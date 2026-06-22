@@ -411,11 +411,6 @@ int main(int argc, char **argv) {
         FatTreeSwitch::_sticky_delta = timeFromUs(ar_sticky_delta);
     }
 
-    if (log_packet){
-        RoceSink::_log_packet_enabled = true;
-        RoceSink::_bitrate = linkspeed;
-    }
-
     LosslessInputQueue::_high_threshold = Packet::data_packet_size()*high_pfc;
     LosslessInputQueue::_low_threshold = Packet::data_packet_size()*low_pfc;
 
@@ -425,7 +420,7 @@ int main(int argc, char **argv) {
     }
 
     if (log_packet){
-        LosslessOutputQueue::_log_packet_enabled = true;
+        Queue::_log_packet_enabled = true;
     }
 
     eventlist.setEndtime(timeFromUs((uint32_t)end_time));
@@ -502,10 +497,6 @@ int main(int argc, char **argv) {
     }
 
     RoceSrc::setMinRTO(1000); //increase RTO to avoid spurious retransmits
-
-    if (log_packet){
-        RoceSrc::_log_packet_enabled = true;
-    }
 
     RoceSrc* roceSrc;
     RoceSink* roceSnk;

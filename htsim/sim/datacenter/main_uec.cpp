@@ -97,6 +97,7 @@ int main(int argc, char **argv) {
     bool log_traffic = false;
     bool log_switches = false;
     bool log_queue_usage = false;
+    bool log_packet = false;
     const double ecn_thresh = 0.5; // default marking threshold for ECN load balancing
     simtime_picosec target_Qdelay = 0;
 
@@ -302,6 +303,9 @@ int main(int argc, char **argv) {
             } else if (!strcmp(argv[i+1], "queue_usage")) {
                 cout << "logging queue usage\n";
                 log_queue_usage = true;
+            } else if (!strcmp(argv[i+1], "packet")) {
+                cout << "logging packet\n";
+                log_packet = true;
             } else {
                 exit_error(argv[0]);
             }
@@ -529,6 +533,9 @@ int main(int argc, char **argv) {
     cout << "Parsed args\n";
     Packet::set_packet_size(packet_size);
 
+    if (log_packet){
+        Queue::_log_packet_enabled = true;
+    }
 
     UecSrc::_mtu = Packet::data_packet_size();
     UecSrc::_mss = UecSrc::_mtu - UecSrc::_hdr_size;
@@ -1020,6 +1027,10 @@ int main(int argc, char **argv) {
     // GO!
     cout << "Starting simulation" << endl;
     while (eventlist.doNextEvent()) {
+    }
+
+    if (log_packet){
+        LoggedPacket::dump_packets();
     }
 
     cout << "Done" << endl;
