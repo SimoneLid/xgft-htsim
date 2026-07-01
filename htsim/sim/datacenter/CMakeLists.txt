@@ -25,6 +25,8 @@ set(LIB_SOURCES
     dragonfly_plus_switch.cpp
     inc_switch.cpp
     inc_topology.cpp
+    xgft_topology.cpp
+    xgft_switch.cpp
 )
 
 # Create static library
@@ -71,6 +73,9 @@ set_property(TARGET htsim_uec_mg PROPERTY EXCLUDE_FROM_ALL TRUE)
 add_executable(htsim_uec_sh main_uec_sh.cpp)
 set_property(TARGET htsim_uec_sh PROPERTY EXCLUDE_FROM_ALL TRUE)
 
+add_executable(htsim_uec_xgft main_uec_xgft.cpp)
+set_property(TARGET htsim_uec_xgft PROPERTY EXCLUDE_FROM_ALL TRUE)
+
 add_executable(htsim_uec_sh_mp main_uec_sh_mp.cpp)
 set_property(TARGET htsim_uec_sh_mp PROPERTY EXCLUDE_FROM_ALL TRUE)
 
@@ -92,6 +97,7 @@ set (ALL_EXECUTABLES
     htsim_uec_sh
     htsim_uec_sh_mp
     htsim_uec
+    htsim_uec_xgft
 )
 foreach(EXECUTABLE ${ALL_EXECUTABLES})
     # Link each executable with the 'htsim' library defined in the parent directory.
