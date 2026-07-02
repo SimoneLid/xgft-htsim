@@ -27,31 +27,45 @@ typedef enum {UPLINK, DOWNLINK} link_direction;
 #endif
 
 // avoid random constants
+/* must be defined when creating the topology
+
 #define TOR_TIER 0
 #define AGG_TIER 1
-#define CORE_TIER 2
+#define CORE_TIER 2*/
 
-class FatTreeTopology;
+class XGFTTopology;
 
 
-class FatTreeTopologyCfg {
-friend class FatTreeTopology;
-friend std::ostream &operator<<(std::ostream &os, FatTreeTopologyCfg const &m);
+class XGFTTopologyCfg {
+friend class XGFTTopology;
+friend std::ostream &operator<<(std::ostream &os, XGFTTopologyCfg const &m);
 public:
-    FatTreeTopologyCfg(queue_type q, queue_type snd);
-    FatTreeTopologyCfg(istream& file, mem_b queue_size,
-                       queue_type q, queue_type snd);
-    FatTreeTopologyCfg(uint32_t tiers, uint32_t no_of_nodes, linkspeed_bps linkspeed, mem_b queuesize, 
-                       simtime_picosec latency, simtime_picosec switch_latency, 
-                       queue_type q, queue_type snd);
-    FatTreeTopologyCfg(uint32_t no_of_nodes, linkspeed_bps linkspeed, mem_b queuesize,
-                       queue_type q);
-    FatTreeTopologyCfg(uint32_t no_of_nodes, linkspeed_bps linkspeed, mem_b queuesize,
-                       queue_type q, uint32_t num_failed);
-    FatTreeTopologyCfg(uint32_t no_of_nodes, linkspeed_bps linkspeed, mem_b queuesize, uint32_t fail,
-                       queue_type q, queue_type snd);
 
-    static unique_ptr<FatTreeTopologyCfg> load(string filename, mem_b queuesize, queue_type q_type, queue_type sender_q_type);
+    XGFTTopologyCfg(queue_type q, queue_type snd);
+    
+    /*
+    TODO after
+    XGFTTopologyCfg(istream& file, mem_b queue_size, queue_type q, queue_type snd);
+    */
+    
+    XGFTTopologyCfg(uint32_t tiers, vector<uint32_t> no_of_children, vector<uint32_t> no_of_parent, linkspeed_bps linkspeed, 
+                    mem_b queuesize, simtime_picosec latency, simtime_picosec switch_latency, 
+                    queue_type q, queue_type snd);
+
+    /*
+    TODO after
+
+    XGFTTopologyCfg(uint32_t no_of_nodes, linkspeed_bps linkspeed, mem_b queuesize,
+                       queue_type q);
+
+    XGFTTopologyCfg(uint32_t no_of_nodes, linkspeed_bps linkspeed, mem_b queuesize,
+                       queue_type q, uint32_t num_failed);
+
+    XGFTTopologyCfg(uint32_t no_of_nodes, linkspeed_bps linkspeed, mem_b queuesize, uint32_t fail,
+                       queue_type q, queue_type snd);
+    */
+
+    static unique_ptr<XGFTTopologyCfg> load(string filename, mem_b queuesize, queue_type q_type, queue_type sender_q_type);
     /*
      Check if all settings in the config are correct. Will abort and print an error message if not.
     */
@@ -73,6 +87,8 @@ public:
     void set_tiers(uint32_t tiers) { if(tiers!=0) _tiers = tiers;}
     uint32_t get_tiers() const { return _tiers; }
 
+
+    // MUST BE CHANGED TO BE MODUL WITH DIFFERENT TIERS
     void set_latencies(simtime_picosec src_lp, simtime_picosec lp_up, simtime_picosec up_cs,
                        simtime_picosec lp_switch, simtime_picosec up_switch, simtime_picosec core_switch) {
         _link_latencies[0] = src_lp;
@@ -82,9 +98,7 @@ public:
         _switch_latencies[1] = up_switch; // aka tor
         _switch_latencies[2] = core_switch; // aka tor
     }
-    void set_podsize(int hosts_per_pod) {
-        _hosts_per_pod = hosts_per_pod;
-    }
+    
 
     void set_linkspeeds(linkspeed_bps linkspeed);
     void set_queue_sizes(mem_b queuesize);
@@ -92,80 +106,28 @@ public:
     void set_params(uint32_t no_of_nodes);
     void set_custom_params(uint32_t no_of_nodes);
 
-    uint32_t HOST_POD_SWITCH(uint32_t src) const {
-        return src/_radix_down[TOR_TIER];
-    }
 
-    uint32_t HOST_POD_ID(uint32_t src) const {
-        if (_tiers == 3)
-            return src%_hosts_per_pod;
-        else
-            // only one pod in leaf-spine
-            return src;
-    }
-
-    uint32_t HOST_POD(uint32_t src) const {
-        if (_tiers == 3) 
-            return src/_hosts_per_pod;
-        else
-            // only one pod in leaf-spine
-            return 0;
-    }
-    /*
-    uint32_t MIN_POD_ID(uint32_t pod_id){
-        if (_tiers == 2) assert(pod_id == 0);
-        return pod_id*K/2;
-    }
-    uint32_t MAX_POD_ID(uint32_t pod_id){
-        if (_tiers == 2) assert(pod_id == 0);
-        return (pod_id+1)*K/2-1;
-    }
-     */
-    uint32_t MIN_POD_TOR_SWITCH(uint32_t pod_id) const {
-        if (_tiers == 2) assert(pod_id == 0);
-        return pod_id * _tor_switches_per_pod;
-    }
-    uint32_t MAX_POD_TOR_SWITCH(uint32_t pod_id) const {
-        if (_tiers == 2) assert(pod_id == 0);
-        return (pod_id + 1) * _tor_switches_per_pod - 1;
-    }
-    uint32_t MIN_POD_AGG_SWITCH(uint32_t pod_id) const {
-        if (_tiers == 2) assert(pod_id == 0);
-        return pod_id * _agg_switches_per_pod;
-    }
-    uint32_t MAX_POD_AGG_SWITCH(uint32_t pod_id) const {
-        if (_tiers == 2) assert(pod_id == 0);
-        return (pod_id + 1) * _agg_switches_per_pod - 1;
-    }
-
-    // convert an agg switch ID to a pod ID
-    uint32_t AGG_SWITCH_POD_ID(uint32_t agg_switch_id) const  {
-        return agg_switch_id / _agg_switches_per_pod;
-    }
-    
-    //uint32_t getK() const {return K;}
     uint32_t getNAGG() const {return NAGG;}
-
     uint32_t no_of_nodes() const {return _no_of_nodes;}
     uint32_t no_of_cores() const {return NCORE;}
     uint32_t no_of_servers() const {return NSRV;}
-    uint32_t no_of_pods() const {return NPOD;}
-    uint32_t tor_switches_per_pod() const {return _tor_switches_per_pod;}
-    uint32_t agg_switches_per_pod() const {return _agg_switches_per_pod;}
     uint32_t bundlesize(int tier) const {return _bundlesize[tier];}
     uint32_t radix_up(int tier) const {return _radix_up[tier];}
     uint32_t radix_down(int tier) const {return _radix_down[tier];}
     uint32_t queue_up(int tier) const {return _queue_up[tier];}
     uint32_t queue_down(int tier) const {return _queue_down[tier];}
 
-    int get_oversubscription_ratio(){int ratio = _oversub[TOR_TIER]; if (_tiers>2) ratio *= _oversub[AGG_TIER]; return ratio;}
+    // modify with the tier as input
+    // int get_oversubscription_ratio(){int ratio = _oversub[TOR_TIER]; if (_tiers>2) ratio *= _oversub[AGG_TIER]; return ratio;}
+    
+    
     simtime_picosec get_diameter_latency() {return _diameter_latency;}
     simtime_picosec get_two_point_diameter_latency(int src, int dst);
 
     uint16_t get_diameter() {return _diameter;}
 private:
-    void initialize(uint32_t tiers, uint32_t no_of_nodes, linkspeed_bps linkspeed, mem_b queuesize,
-                    simtime_picosec latency, simtime_picosec switch_latency, 
+    void initialize(uint32_t tiers, vector<uint32_t> no_of_children, vector<uint32_t> no_of_parent, linkspeed_bps linkspeed, 
+                    mem_b queuesize, simtime_picosec latency, simtime_picosec switch_latency, 
                     queue_type q, queue_type snd);
     void read_cfg(istream& file, mem_b queuesize);
 
@@ -174,16 +136,21 @@ private:
     queue_type _qt;
     queue_type _sender_qt;
 
-    uint32_t NCORE, NAGG, NTOR, NSRV, NPOD;
-    uint32_t _tor_switches_per_pod, _agg_switches_per_pod;
+    uint32_t NCORE, NTOR, NSRV;
+    vector<uint32_t> NAGG;
 
     uint32_t _tiers;
 
+    uint32_t TOR_TIER = 0;
+    vector<uint32_t> AGG_TIER;
+    uint32_t CORE_TIER;
+
+
     // _link_latencies[0] is the ToR->host latency.
-    simtime_picosec _link_latencies[3];
+    vector<simtime_picosec> _link_latencies;
 
     // _switch_latencies[0] is the ToR switch latency.
-    simtime_picosec _switch_latencies[3];
+    vector<simtime_picosec> _switch_latencies;
 
     // How many uplinks to bundle from each node in a tier to the same
     // node in the tier below.  Eg bundlesize[2] = 2 means two
@@ -191,26 +158,24 @@ private:
     //
     // Note: we don't currently support bundling from the hosts to
     // ToRs because transport needs to know for that to work.
-    uint32_t _bundlesize[3];
+    vector<uint32_t> _bundlesize;
 
     // Linkspeed of each link in a switch tier to the tier below. ToRs are tier 0.
     // Eg. _downlink_speeds[0] = 400Gbps indicates 400Gbps links from hosts
     // to ToRs.
-    linkspeed_bps _downlink_speeds[3];
+    vector<linkspeed_bps> _downlink_speeds;
 
     // degree of oversubscription at tier.  Eg _oversub[TOR_TIER] = 3 implies 3x more bw to hosts than to agg switches.
-    uint32_t _oversub[3];
+    vector<uint32_t> _oversub;
 
     // switch radix used.  Eg _radix_down[0] = 32 indicates 32 downlinks from ToRs.  _radix_up[2] should be zero in a 3-tier topology.  
-    uint32_t _radix_down[3];
-    uint32_t _radix_up[2];
+    vector<uint32_t> _radix_down;
+    vector<uint32_t> _radix_up;
 
     // switch queue size used.  Eg _queue_down[0] = 32 indicates 32 downlinks from ToRs.  _queue_up[2] should be zero in a 3-tier topology.  
-    mem_b _queue_down[3];
-    mem_b _queue_up[2];
+    vector<mem_b> _queue_down;
+    vector<mem_b> _queue_up;
 
-    // number of hosts in a pod.  
-    uint32_t _hosts_per_pod; 
 
     //ecn parameters
     bool _enable_ecn;
@@ -231,14 +196,16 @@ private:
 
 template<class P> void delete_3d_vector(vector<vector<vector<P*>>>& vec3d);
 
-class FatTreeTopology: public Topology{
+class XGFTTopology: public Topology{
 public:
-    FatTreeTopology(const FatTreeTopologyCfg* cfg,
+    XGFTTopology(const XGFTTopologyCfg* cfg,
                     QueueLoggerFactory* logger_factory,
                     EventList* ev,
                     FirstFit * fit);
-    ~FatTreeTopology() override;
+    ~XGFTTopology() override;
 
+
+    /*
     vector <Switch*> switches_lp;
     vector <Switch*> switches_up;
     vector <Switch*> switches_c;
@@ -257,7 +224,20 @@ public:
     vector< vector< vector<BaseQueue*> > > queues_nup_nc;
     vector< vector< vector<BaseQueue*> > > queues_nlp_nup;
     vector< vector< vector<BaseQueue*> > > queues_ns_nlp;
-  
+    */
+
+
+    // everything in a single vector where the 1st index is the tier
+    vector<vector<Switch*>> switches;
+
+    vector<vector<vector<vector<Pipe*>>>> pipes_down;
+    vector<vector<vector<vector<BaseQueue*>>>> queues_down;
+
+    // when going the 1st index is +1
+    vector<vector<vector<vector<Pipe*>>>> pipes_up;
+    vector<vector<vector<vector<BaseQueue*>>>> queues_up;
+
+
     QueueLoggerFactory* _logger_factory;
     EventList* _eventlist;
     FirstFit* _ff;
@@ -276,9 +256,9 @@ public:
     // add loggers to record total queue size at switches
     virtual void add_switch_loggers(Logfile& log, simtime_picosec sample_period); 
 
-    const FatTreeTopologyCfg& cfg() { return *_cfg; };
+    const XGFTTopologyCfg& cfg() { return *_cfg; };
 private:
-    const FatTreeTopologyCfg* _cfg;
+    const XGFTTopologyCfg* _cfg;
     map<Queue*,int> _link_usage;
     int64_t find_lp_switch(Queue* queue);
     int64_t find_up_switch(Queue* queue);
