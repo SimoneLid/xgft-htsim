@@ -136,13 +136,15 @@ private:
     queue_type _qt;
     queue_type _sender_qt;
 
-    uint32_t NCORE, NTOR, NSRV;
+    // could unify in a vector NSW[_tiers] to be accessed easily
+    uint32_t NCORE = 0, NTOR = 0, NSRV = 0;
+    // index 0 is empty
     vector<uint32_t> NAGG;
 
     uint32_t _tiers;
 
     uint32_t TOR_TIER = 0;
-    vector<uint32_t> AGG_TIER;
+    uint32_t LAST_AGG_TIER;
     uint32_t CORE_TIER;
 
 
@@ -194,7 +196,7 @@ private:
     uint16_t _diameter;
 };
 
-template<class P> void delete_3d_vector(vector<vector<vector<P*>>>& vec3d);
+template<class P> void delete_4d_vector(vector<vector<vector<vector<P*>>>>& vec4d);
 
 class XGFTTopology: public Topology{
 public:
@@ -233,7 +235,7 @@ public:
     vector<vector<vector<vector<Pipe*>>>> pipes_down;
     vector<vector<vector<vector<BaseQueue*>>>> queues_down;
 
-    // when going the 1st index is +1
+    // when going up the 1st index is +1
     vector<vector<vector<vector<Pipe*>>>> pipes_up;
     vector<vector<vector<vector<BaseQueue*>>>> queues_up;
 
