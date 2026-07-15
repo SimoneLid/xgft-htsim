@@ -33,16 +33,13 @@ void to_lower(string& s) {
 
 std::ostream &operator<<(std::ostream &os, XGFTTopologyCfg const &m) { 
     os << "XGFTTopologyCfg"
-       << " NCORE=" << m.NCORE;
-    
-    os << "NAGG=[";
-    for (int i = 1; i < m.NAGG.size(); i++){
-        os << m.NAGG[i] << (i + 1 < m.NAGG.size() ? "," : "");
+       << "NSW=[";
+    for (int i = 0; i < m.NSW.size(); i++){
+        os << m.NSW[i] << (i + 1 < m.NSW.size() ? "," : "");
     }
     os << "]";
 
-    os  << " NTOR=" << m.NTOR
-        << " NSRV=" << m.NSRV
+    os  << " NSRV=" << m.NSRV
         << " tiers=" << m._tiers
         << " enabled_ecn=" << m._enable_ecn
         << " enable_ecn_on_tor_downlink=" << m._enable_ecn_on_tor_downlink
@@ -66,7 +63,7 @@ std::ostream &operator<<(std::ostream &os, XGFTTopologyCfg const &m) {
             << " radix_down=" << m._radix_down[tier]
             << " queue_down=" << m._queue_down[tier];
     
-        if (tier < 2) {
+        if (tier < m._tiers-1) {
             os   << " radix_up=" << m._radix_up[tier]
                  << " queue_up=" << m._queue_up[tier];
         }
@@ -81,9 +78,7 @@ XGFTTopologyCfg::XGFTTopologyCfg(queue_type q, queue_type snd):
                         _from_file(false),
                         _qt(q),
                         _sender_qt(snd),
-                        NCORE(0), 
-                        NAGG{0,0}, 
-                        NTOR(0), 
+                        NSW{0,0,0}, 
                         NSRV(0),
                         _tiers(3),
                         _link_latencies{0,0,0},
@@ -520,21 +515,11 @@ void XGFTTopologyCfg::set_params(vector<uint32_t> no_of_children, vector<uint32_
     _no_of_nodes = curr_no_of_switches;
     NSRV = _no_of_nodes;
     
-    if (LAST_AGG_TIER > 0) {
-        NAGG.resize(LAST_AGG_TIER+1);
-    }
+    NSW.resize(_tiers);
     
     for (int tier = TOR_TIER; tier <= _tiers-1; tier++) {
         curr_no_of_switches = (curr_no_of_switches / no_of_children[tier]) * no_of_parent[tier];
-        if (tier == TOR_TIER) {
-            NTOR = curr_no_of_switches;
-        }
-        else if (tier <= LAST_AGG_TIER) {
-            NAGG[tier] = curr_no_of_switches;
-        }
-        else if (tier == CORE_TIER) {
-            NCORE = curr_no_of_switches;
-        }
+        NSW[tier] = curr_no_of_switches;
 
         _radix_down[tier] = no_of_children[tier];
 
@@ -882,6 +867,29 @@ XGFTTopology::XGFTTopology(const XGFTTopologyCfg* cfg,
     alloc_vectors();
 
     QueueLogger* queueLogger;
+
+    for (int tier = _tiers-1; tier >= 0; tier++) {
+        for (uint32_t j=0;j<_cfg->NSW[tier];j++) {
+            int switch_lower_tier = 0;
+            if (tier == 0) {
+                switch_lower_tier = NSRV;
+            }
+            else {
+                switch_lower_tier = NSW[tier-1];
+            }
+
+            for (uint32_t k=0;k<switch_lower_tier;k++) {
+                for (uint32_t b = 0; b < _cfg->_bundlesize[tier]; b++) {
+                    queues_down[tier][j][k][b] = NULL;
+                    pipes_down[tier][j][k][b] = NULL;
+                    queues_up[tier][k][j][b] = NULL;
+                    pipes_up[tier][k][j][b] = NULL;
+                }
+            }
+        }
+    }
+
+    /*
     if (_cfg->_tiers == 3) {
         for (uint32_t j=0;j<_cfg->NCORE;j++) {
             for (uint32_t k=0;k<_cfg->NAGG;k++) {
@@ -916,6 +924,7 @@ XGFTTopology::XGFTTopology(const XGFTTopologyCfg* cfg,
             }
         }
     }
+    */
 
     //create switches if we have lossless operation
     //if (_qt==LOSSLESS)
@@ -1198,9 +1207,9 @@ XGFTTopology::~XGFTTopology() {
 void XGFTTopology::alloc_vectors() {
 
     // check the max number of switches in a tier for resizing
-    int max_switches_in_tier = max({NSRV, NTOR, NCORE});
-    for (int tier = TOR_TIER+1; tier <= LAST_AGG_TIER; tier++) {
-        max_switches_in_tier = max(max_switches_in_tier, NAGG[tier]);
+    int max_switches_in_tier = NSRV;
+    for (int tier = TOR_TIER; tier < NSW.size(); tier++) {
+        max_switches_in_tier = max(max_switches_in_tier, NSW[tier]);
     }
 
     // check the max number of bundlesize in a tier for resizing
@@ -1212,13 +1221,13 @@ void XGFTTopology::alloc_vectors() {
     // the vectors have all the same lenght even if the number of switches in each level is different
     switches.resize(_cfg->_tiers, vector<Switch*>(max_switches_in_tier));
 
-    pipes_down.resize(_cfg->tiers, vector<vector<vector<Pipe*>>>(max_switches_in_tier, vector<vector<Pipe*>>(max_switches_in_tier, vector<Pipe*>(max_bundlesize))));
+    pipes_down.resize(_cfg->_tiers, vector<vector<vector<Pipe*>>>(max_switches_in_tier, vector<vector<Pipe*>>(max_switches_in_tier, vector<Pipe*>(max_bundlesize))));
 
-    queues_down.resize(_cfg->tiers, vector<vector<vector<BaseQueue*>>>(max_switches_in_tier, vector<vector<BaseQueue*>>(max_switches_in_tier, vector<BaseQueue*>(max_bundlesize))));
+    queues_down.resize(_cfg->_tiers, vector<vector<vector<BaseQueue*>>>(max_switches_in_tier, vector<vector<BaseQueue*>>(max_switches_in_tier, vector<BaseQueue*>(max_bundlesize))));
 
-    pipes_up.resize(_cfg->tiers, vector<vector<vector<Pipe*>>>(max_switches_in_tier, vector<vector<Pipe*>>(max_switches_in_tier, vector<Pipe*>(max_bundlesize))));
+    pipes_up.resize(_cfg->_tiers, vector<vector<vector<Pipe*>>>(max_switches_in_tier, vector<vector<Pipe*>>(max_switches_in_tier, vector<Pipe*>(max_bundlesize))));
 
-    queues_up.resize(_cfg->tiers, vector<vector<vector<BaseQueue*>>>(max_switches_in_tier, vector<vector<BaseQueue*>>(max_switches_in_tier, vector<BaseQueue*>(max_bundlesize))));
+    queues_up.resize(_cfg->_tiers, vector<vector<vector<BaseQueue*>>>(max_switches_in_tier, vector<vector<BaseQueue*>>(max_switches_in_tier, vector<BaseQueue*>(max_bundlesize))));
 
     /*
     switches_lp.resize(_cfg->NTOR, nullptr);

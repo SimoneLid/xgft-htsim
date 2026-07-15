@@ -88,28 +88,27 @@ public:
     uint32_t get_tiers() const { return _tiers; }
 
 
-    // MUST BE CHANGED TO BE MODUL WITH DIFFERENT TIERS
-    void set_latencies(simtime_picosec src_lp, simtime_picosec lp_up, simtime_picosec up_cs,
-                       simtime_picosec lp_switch, simtime_picosec up_switch, simtime_picosec core_switch) {
-        _link_latencies[0] = src_lp;
-        _link_latencies[1] = lp_up;
-        _link_latencies[2] = up_cs;
-        _switch_latencies[0] = lp_switch; // aka tor
-        _switch_latencies[1] = up_switch; // aka tor
-        _switch_latencies[2] = core_switch; // aka tor
+    // modified to be modular with different tiers
+    void set_latencies(vector<simtime_picosec> link_latencies, vector<simtime_picosec> switch_latencies) {
+        for (int tier = 0; tier < link_latencies.size() && tier < _tiers; tier++) {
+            _link_latencies[tier] = link_latencies[tier];
+        }
+
+        for (int tier = 0; tier < switch_latencies.size() && tier < _tiers; tier++) {
+            _switch_latencies[tier] = switch_latencies[tier];
+        }
     }
     
 
     void set_linkspeeds(linkspeed_bps linkspeed);
     void set_queue_sizes(mem_b queuesize);
 
-    void set_params(uint32_t no_of_nodes);
+    void set_params(vector<uint32_t> no_of_children, vector<uint32_t> no_of_parent);
     void set_custom_params(uint32_t no_of_nodes);
 
 
-    uint32_t getNAGG() const {return NAGG;}
     uint32_t no_of_nodes() const {return _no_of_nodes;}
-    uint32_t no_of_cores() const {return NCORE;}
+    uint32_t no_of_switches(int tier) const {return NSW[tier];}
     uint32_t no_of_servers() const {return NSRV;}
     uint32_t bundlesize(int tier) const {return _bundlesize[tier];}
     uint32_t radix_up(int tier) const {return _radix_up[tier];}
@@ -117,8 +116,8 @@ public:
     uint32_t queue_up(int tier) const {return _queue_up[tier];}
     uint32_t queue_down(int tier) const {return _queue_down[tier];}
 
-    // modify with the tier as input
-    // int get_oversubscription_ratio(){int ratio = _oversub[TOR_TIER]; if (_tiers>2) ratio *= _oversub[AGG_TIER]; return ratio;}
+    // modified with the tier as input
+    int get_oversubscription_ratio(int tier){return _oversub[tier];}
     
     
     simtime_picosec get_diameter_latency() {return _diameter_latency;}
@@ -136,10 +135,8 @@ private:
     queue_type _qt;
     queue_type _sender_qt;
 
-    // could unify in a vector NSW[_tiers] to be accessed easily
-    uint32_t NCORE = 0, NTOR = 0, NSRV = 0;
-    // index 0 is empty
-    vector<uint32_t> NAGG;
+    // unified in a vector NSW[_tiers] to be accessed easily
+    vector<uint32_t> NSW;
 
     uint32_t _tiers;
 
