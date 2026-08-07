@@ -26,12 +26,7 @@ typedef enum {UNDEFINED, RANDOM, ECN, COMPOSITE, PRIORITY,
 typedef enum {UPLINK, DOWNLINK} link_direction;
 #endif
 
-// avoid random constants
-/* must be defined when creating the topology
-
 #define TOR_TIER 0
-#define AGG_TIER 1
-#define CORE_TIER 2*/
 
 class XGFTTopology;
 
@@ -48,7 +43,7 @@ public:
     XGFTTopologyCfg(istream& file, mem_b queue_size, queue_type q, queue_type snd);
     */
     
-    XGFTTopologyCfg(uint32_t tiers, vector<uint32_t> no_of_children, vector<uint32_t> no_of_parent, linkspeed_bps linkspeed, 
+    XGFTTopologyCfg(uint32_t tiers, uint32_t no_of_nodes, vector<uint32_t> no_of_children, vector<uint32_t> no_of_parent, linkspeed_bps linkspeed, 
                     mem_b queuesize, simtime_picosec latency, simtime_picosec switch_latency, 
                     queue_type q, queue_type snd);
 
@@ -90,11 +85,11 @@ public:
 
     // modified to be modular with different tiers
     void set_latencies(vector<simtime_picosec> link_latencies, vector<simtime_picosec> switch_latencies) {
-        for (int tier = 0; tier < link_latencies.size() && tier < _tiers; tier++) {
+        for (uint32_t tier = 0; tier < link_latencies.size() && tier < _tiers; tier++) {
             _link_latencies[tier] = link_latencies[tier];
         }
 
-        for (int tier = 0; tier < switch_latencies.size() && tier < _tiers; tier++) {
+        for (uint32_t tier = 0; tier < switch_latencies.size() && tier < _tiers; tier++) {
             _switch_latencies[tier] = switch_latencies[tier];
         }
     }
@@ -103,8 +98,30 @@ public:
     void set_linkspeeds(linkspeed_bps linkspeed);
     void set_queue_sizes(mem_b queuesize);
 
-    void set_params(vector<uint32_t> no_of_children, vector<uint32_t> no_of_parent);
+    void set_params(uint32_t no_of_nodes, vector<uint32_t> no_of_children, vector<uint32_t> no_of_parent);
     void set_custom_params(uint32_t no_of_nodes);
+
+    uint32_t HOST_POD_SWITCH(uint32_t src) const {
+        return src/_radix_down[TOR_TIER];
+    }
+
+    uint32_t lca_level(uint32_t src, uint32_t dest) const {
+        //lowest common ancestor betweeen src and dest
+        for (uint32_t i = 0; i <= _tiers; ++i) {
+            if (src / L[i] == dest / L[i]) {
+                return i - 1;
+            }
+        }
+        return _tiers - 1; 
+    }
+
+    uint32_t base_parent(uint32_t src, uint32_t tier) const {
+        uint32_t q = src / W[tier];
+        uint32_t r = src % W[tier];
+        uint32_t s = q / _radix_down[tier+1]; 
+
+        return _radix_up[tier] * (s * W[tier] + r);
+    }
 
 
     uint32_t no_of_nodes() const {return _no_of_nodes;}
@@ -125,7 +142,7 @@ public:
 
     uint16_t get_diameter() {return _diameter;}
 private:
-    void initialize(uint32_t tiers, vector<uint32_t> no_of_children, vector<uint32_t> no_of_parent, linkspeed_bps linkspeed, 
+    void initialize(uint32_t tiers, uint32_t no_of_nodes, vector<uint32_t> no_of_children, vector<uint32_t> no_of_parent, linkspeed_bps linkspeed, 
                     mem_b queuesize, simtime_picosec latency, simtime_picosec switch_latency, 
                     queue_type q, queue_type snd);
     void read_cfg(istream& file, mem_b queuesize);
@@ -137,10 +154,11 @@ private:
 
     // unified in a vector NSW[_tiers] to be accessed easily
     vector<uint32_t> NSW;
+    vector<uint32_t> W;
+    uint32_t NSRV;
 
     uint32_t _tiers;
 
-    uint32_t TOR_TIER = 0;
     uint32_t LAST_AGG_TIER;
     uint32_t CORE_TIER;
 
@@ -204,35 +222,15 @@ public:
     ~XGFTTopology() override;
 
 
-    /*
-    vector <Switch*> switches_lp;
-    vector <Switch*> switches_up;
-    vector <Switch*> switches_c;
-
-    // 3rd index is link number in bundle
-    vector< vector< vector<Pipe*> > > pipes_nc_nup;
-    vector< vector< vector<Pipe*> > > pipes_nup_nlp;
-    vector< vector< vector<Pipe*> > > pipes_nlp_ns;
-    vector< vector< vector<BaseQueue*> > > queues_nc_nup;
-    vector< vector< vector<BaseQueue*> > > queues_nup_nlp;
-    vector< vector< vector<BaseQueue*> > > queues_nlp_ns;
-
-    vector< vector< vector<Pipe*> > > pipes_nup_nc;
-    vector< vector< vector<Pipe*> > > pipes_nlp_nup;
-    vector< vector< vector<Pipe*> > > pipes_ns_nlp;
-    vector< vector< vector<BaseQueue*> > > queues_nup_nc;
-    vector< vector< vector<BaseQueue*> > > queues_nlp_nup;
-    vector< vector< vector<BaseQueue*> > > queues_ns_nlp;
-    */
-
-
     // everything in a single vector where the 1st index is the tier
     vector<vector<Switch*>> switches;
-
+    
+    // _pipes_down[0][i][j][b] is the ToR i->host j
     vector<vector<vector<vector<Pipe*>>>> pipes_down;
     vector<vector<vector<vector<BaseQueue*>>>> queues_down;
 
-    // when going up the 1st index is +1
+    // when going up the 1st index is +1 because 0 is host, tor instead is 1
+    // _pipes_up[0][i][j][b] is the host i->Tor j
     vector<vector<vector<vector<Pipe*>>>> pipes_up;
     vector<vector<vector<vector<BaseQueue*>>>> queues_up;
 
@@ -250,7 +248,7 @@ public:
     void print_path(std::ofstream& paths,uint32_t src,const Route* route);
     vector<uint32_t>* get_neighbours(uint32_t src) { return NULL;};
 
-    void add_failed_link(uint32_t type, uint32_t switch_id, uint32_t link_id);
+    void add_failed_link(uint32_t tier, uint32_t type, uint32_t switch_id, uint32_t link_id);
 
     // add loggers to record total queue size at switches
     virtual void add_switch_loggers(Logfile& log, simtime_picosec sample_period); 

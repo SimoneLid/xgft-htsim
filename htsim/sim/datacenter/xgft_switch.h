@@ -6,7 +6,7 @@
 #include "callback_pipe.h"
 #include <unordered_map>
 
-class FatTreeTopology;
+class XGFTTopology;
 
 /*
  * Copyright (C) 2013-2014 Universita` di Pisa. All rights reserved.
@@ -81,7 +81,7 @@ public:
 
 };
 
-class FatTreeSwitch : public Switch {
+class XGFTSwitch : public Switch {
 public:
     enum switch_type {
         NONE = 0, TOR = 1, AGG = 2, CORE = 3
@@ -95,8 +95,8 @@ public:
         PER_PACKET = 0, PER_FLOWLET = 1
     };
 
-    FatTreeSwitch(EventList& eventlist, string s, switch_type t, uint32_t id,simtime_picosec switch_delay, FatTreeTopology* ft);
-    ~FatTreeSwitch() override;
+    XGFTSwitch(EventList& eventlist, string s, switch_type t, uint32_t id, uint32_t tier, simtime_picosec switch_delay, FatTreeTopology* ft);
+    ~XGFTSwitch() override;
   
     virtual void receivePacket(Packet& pkt);
     virtual Route* getNextHop(Packet& pkt, BaseQueue* ingress_port);
@@ -135,7 +135,8 @@ public:
 private:
     switch_type _type;
     Pipe* _pipe;
-    FatTreeTopology* _ft;
+    uint32_t _tier;
+    XGFTTopology* _ft;
     
     //CAREFUL: can't always have a single FIB for all up destinations when there are failures!
     vector<FibEntry*>* _uproutes;

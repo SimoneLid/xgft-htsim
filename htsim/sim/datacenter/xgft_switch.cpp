@@ -6,26 +6,27 @@
 #include "queue_lossless.h"
 #include "queue_lossless_output.h"
 
-unordered_map<BaseQueue*,uint32_t> FatTreeSwitch::_port_flow_counts;
+unordered_map<BaseQueue*,uint32_t> XGFTSwitch::_port_flow_counts;
 
-FatTreeSwitch::FatTreeSwitch(EventList& eventlist, string s, switch_type t, uint32_t id,simtime_picosec delay, FatTreeTopology* ft): Switch(eventlist, s) {
+XGFTSwitch::XGFTSwitch(EventList& eventlist, string s, switch_type t, uint32_t id, uint32_t tier, simtime_picosec delay, XGFTTopology* ft): Switch(eventlist, s) {
     _id = id;
     _type = t;
     _pipe = new CallbackPipe(delay,eventlist, this);
     _uproutes = NULL;
     _ft = ft;
     _crt_route = 0;
+    _tier = tier;
     _hash_salt = random();
     _last_choice = eventlist.now();
     _fib = new RouteTable();
 }
 
-FatTreeSwitch::~FatTreeSwitch() {
+XGFTSwitch::~XGFTSwitch() {
     delete _pipe;
     delete _fib;
 }
 
-void FatTreeSwitch::receivePacket(Packet& pkt){
+void XGFTSwitch::receivePacket(Packet& pkt){
     if (pkt.type()==ETH_PAUSE){
         EthPausePacket* p = (EthPausePacket*)&pkt;
         //I must be in lossless mode!
@@ -62,7 +63,7 @@ void FatTreeSwitch::receivePacket(Packet& pkt){
     }
 };
 
-void FatTreeSwitch::addHostPort(int addr, int flowid, PacketSink* transport_port){
+void XGFTSwitch::addHostPort(int addr, int flowid, PacketSink* transport_port){
     Route* rt = new Route();
     rt->push_back(_ft->queues_nlp_ns[_ft->cfg().HOST_POD_SWITCH(addr)][addr][0]);
     rt->push_back(_ft->pipes_nlp_ns[_ft->cfg().HOST_POD_SWITCH(addr)][addr][0]);
@@ -77,7 +78,7 @@ uint32_t mhash(uint32_t x) {
     return x;
 }
 
-uint32_t FatTreeSwitch::adaptive_route_p2c(vector<FibEntry*>* ecmp_set, int8_t (*cmp)(FibEntry*,FibEntry*)){
+uint32_t XGFTSwitch::adaptive_route_p2c(vector<FibEntry*>* ecmp_set, int8_t (*cmp)(FibEntry*,FibEntry*)){
     uint32_t choice = 0, min = UINT32_MAX;
     uint32_t start, i = 0;
     static const uint16_t nr_choices = 2;
@@ -98,7 +99,7 @@ uint32_t FatTreeSwitch::adaptive_route_p2c(vector<FibEntry*>* ecmp_set, int8_t (
     return choice;
 }
 
-uint32_t FatTreeSwitch::adaptive_route(vector<FibEntry*>* ecmp_set, int8_t (*cmp)(FibEntry*,FibEntry*)){
+uint32_t XGFTSwitch::adaptive_route(vector<FibEntry*>* ecmp_set, int8_t (*cmp)(FibEntry*,FibEntry*)){
     //cout << "adaptive_route" << endl;
     uint32_t choice = 0;
 
@@ -138,7 +139,7 @@ uint32_t FatTreeSwitch::adaptive_route(vector<FibEntry*>* ecmp_set, int8_t (*cmp
     return choice;
 }
 
-uint32_t FatTreeSwitch::replace_worst_choice(vector<FibEntry*>* ecmp_set, int8_t (*cmp)(FibEntry*,FibEntry*),uint32_t my_choice){
+uint32_t XGFTSwitch::replace_worst_choice(vector<FibEntry*>* ecmp_set, int8_t (*cmp)(FibEntry*,FibEntry*),uint32_t my_choice){
     uint32_t best_choice = 0;
     uint32_t worst_choice = 0;
 
@@ -181,7 +182,7 @@ uint32_t FatTreeSwitch::replace_worst_choice(vector<FibEntry*>* ecmp_set, int8_t
 }
 
 
-int8_t FatTreeSwitch::compare_pause(FibEntry* left, FibEntry* right){
+int8_t XGFTSwitch::compare_pause(FibEntry* left, FibEntry* right){
     Route * r1= left->getEgressPort();
     assert(r1 && r1->size()>1);
     LosslessOutputQueue* q1 = dynamic_cast<LosslessOutputQueue*>(r1->at(0));
@@ -197,7 +198,7 @@ int8_t FatTreeSwitch::compare_pause(FibEntry* left, FibEntry* right){
         return 0;
 }
 
-int8_t FatTreeSwitch::compare_flow_count(FibEntry* left, FibEntry* right){
+int8_t XGFTSwitch::compare_flow_count(FibEntry* left, FibEntry* right){
     Route * r1= left->getEgressPort();
     assert(r1 && r1->size()>1);
     BaseQueue* q1 = (BaseQueue*)(r1->at(0));
@@ -221,7 +222,7 @@ int8_t FatTreeSwitch::compare_flow_count(FibEntry* left, FibEntry* right){
         return 0;
 }
 
-int8_t FatTreeSwitch::compare_queuesize(FibEntry* left, FibEntry* right){
+int8_t XGFTSwitch::compare_queuesize(FibEntry* left, FibEntry* right){
     Route * r1= left->getEgressPort();
     assert(r1 && r1->size()>1);
     BaseQueue* q1 = dynamic_cast<BaseQueue*>(r1->at(0));
@@ -237,7 +238,7 @@ int8_t FatTreeSwitch::compare_queuesize(FibEntry* left, FibEntry* right){
         return 0;
 }
 
-int8_t FatTreeSwitch::compare_bandwidth(FibEntry* left, FibEntry* right){
+int8_t XGFTSwitch::compare_bandwidth(FibEntry* left, FibEntry* right){
     Route * r1= left->getEgressPort();
     assert(r1 && r1->size()>1);
     BaseQueue* q1 = dynamic_cast<BaseQueue*>(r1->at(0));
@@ -260,7 +261,7 @@ int8_t FatTreeSwitch::compare_bandwidth(FibEntry* left, FibEntry* right){
         return 0;        */
 }
 
-int8_t FatTreeSwitch::compare_pqb(FibEntry* left, FibEntry* right){
+int8_t XGFTSwitch::compare_pqb(FibEntry* left, FibEntry* right){
     //compare pause, queuesize, bandwidth.
     int8_t p = compare_pause(left, right);
 
@@ -275,7 +276,7 @@ int8_t FatTreeSwitch::compare_pqb(FibEntry* left, FibEntry* right){
     return compare_bandwidth(left,right);
 }
 
-int8_t FatTreeSwitch::compare_pq(FibEntry* left, FibEntry* right){
+int8_t XGFTSwitch::compare_pq(FibEntry* left, FibEntry* right){
     //compare pause, queuesize, bandwidth.
     int8_t p = compare_pause(left, right);
 
@@ -285,7 +286,7 @@ int8_t FatTreeSwitch::compare_pq(FibEntry* left, FibEntry* right){
     return compare_queuesize(left,right);
 }
 
-int8_t FatTreeSwitch::compare_qb(FibEntry* left, FibEntry* right){
+int8_t XGFTSwitch::compare_qb(FibEntry* left, FibEntry* right){
     //compare pause, queuesize, bandwidth.
     int8_t p = compare_queuesize(left, right);
 
@@ -295,7 +296,7 @@ int8_t FatTreeSwitch::compare_qb(FibEntry* left, FibEntry* right){
     return compare_bandwidth(left,right);
 }
 
-int8_t FatTreeSwitch::compare_pb(FibEntry* left, FibEntry* right){
+int8_t XFGTSwitch::compare_pb(FibEntry* left, FibEntry* right){
     //compare pause, queuesize, bandwidth.
     int8_t p = compare_pause(left, right);
 
@@ -305,7 +306,7 @@ int8_t FatTreeSwitch::compare_pb(FibEntry* left, FibEntry* right){
     return compare_bandwidth(left,right);
 }
 
-void FatTreeSwitch::permute_paths(vector<FibEntry *>* uproutes) {
+void XGFTSwitch::permute_paths(vector<FibEntry *>* uproutes) {
     int len = uproutes->size();
     for (int i = 0; i < len; i++) {
         int ix = random() % (len - i);
@@ -315,17 +316,17 @@ void FatTreeSwitch::permute_paths(vector<FibEntry *>* uproutes) {
     }
 }
 
-FatTreeSwitch::routing_strategy FatTreeSwitch::_strategy = FatTreeSwitch::NIX;
-uint16_t FatTreeSwitch::_ar_fraction = 0;
-uint16_t FatTreeSwitch::_ar_sticky = FatTreeSwitch::PER_PACKET;
-simtime_picosec FatTreeSwitch::_sticky_delta = timeFromUs((uint32_t)10);
-double FatTreeSwitch::_ecn_threshold_fraction = 0.2;
-double FatTreeSwitch::_speculative_threshold_fraction = 0.2;
-int8_t (*FatTreeSwitch::fn)(FibEntry*,FibEntry*)= &FatTreeSwitch::compare_queuesize;
-uint16_t FatTreeSwitch::_trim_size = 64;
-bool FatTreeSwitch::_disable_trim = false;
+XGFTSwitch::routing_strategy XGFTSwitch::_strategy = XGFTSwitch::NIX;
+uint16_t XGFTSwitch::_ar_fraction = 0;
+uint16_t XGFTSwitch::_ar_sticky = XGFTSwitch::PER_PACKET;
+simtime_picosec XGFTSwitch::_sticky_delta = timeFromUs((uint32_t)10);
+double XGFTSwitch::_ecn_threshold_fraction = 0.2;
+double XGFTSwitch::_speculative_threshold_fraction = 0.2;
+int8_t (*XGFTSwitch::fn)(FibEntry*,FibEntry*)= &XGFTSwitch::compare_queuesize;
+uint16_t XGFTSwitch::_trim_size = 64;
+bool XGFTSwitch::_disable_trim = false;
 
-Route* FatTreeSwitch::getNextHop(Packet& pkt, BaseQueue* ingress_port){
+Route* XGFTSwitch::getNextHop(Packet& pkt, BaseQueue* ingress_port){
     vector<FibEntry*> * available_hops = _fib->getRoutes(pkt.dst());
 
     if (available_hops){
@@ -344,10 +345,10 @@ Route* FatTreeSwitch::getNextHop(Packet& pkt, BaseQueue* ingress_port){
                     ecmp_choice = freeBSDHash(pkt.flow_id(),pkt.pathid(),_hash_salt) % available_hops->size();
                     break;
                 }
-                if (_ar_sticky==FatTreeSwitch::PER_PACKET){
+                if (_ar_sticky==XGFTSwitch::PER_PACKET){
                     ecmp_choice = adaptive_route(available_hops,fn); 
                 } 
-                else if (_ar_sticky==FatTreeSwitch::PER_FLOWLET){     
+                else if (_ar_sticky==XGFTSwitch::PER_FLOWLET){     
                     if (_flowlet_maps.find(pkt.flow_id())!=_flowlet_maps.end()){
                         FlowletInfo* f = _flowlet_maps[pkt.flow_id()];
                         
@@ -428,31 +429,22 @@ Route* FatTreeSwitch::getNextHop(Packet& pkt, BaseQueue* ingress_port){
             if (_uproutes)
                 _fib->setRoutes(pkt.dst(),_uproutes);
             else {
-                uint32_t podid,agg_min,agg_max;
+                par_min = _ft->cfg().MIN_PARENT_SWITCH(_id);
+                par_max = _ft->cfg().MAX_PARENT_SWITCH(_id);
 
-                if (_ft->cfg().get_tiers()==3) {
-                    podid = _id / _ft->cfg().tor_switches_per_pod();
-                    agg_min = _ft->cfg().MIN_POD_AGG_SWITCH(podid);
-                    agg_max = _ft->cfg().MAX_POD_AGG_SWITCH(podid);
-                }
-                else {
-                    agg_min = 0;
-                    agg_max = _ft->cfg().getNAGG()-1;
-                }
-
-                for (uint32_t k=agg_min; k<=agg_max;k++){
-                    for (uint32_t b = 0; b < _ft->cfg().bundlesize(AGG_TIER); b++) {
+                for (uint32_t k=par_min; k<=par_max;k++){
+                    for (uint32_t b = 0; b < _ft->cfg().get_bundlesize(_tier); b++) {
                         Route * r = new Route();
-                        r->push_back(_ft->queues_nlp_nup[_id][k][b]);
+                        r->push_back(_ft->queues_up[_tier + 1][_id][k][b]);
                         assert(((BaseQueue*)r->at(0))->getSwitch() == this);
 
-                        r->push_back(_ft->pipes_nlp_nup[_id][k][b]);
-                        r->push_back(_ft->queues_nlp_nup[_id][k][b]->getRemoteEndpoint());
+                        r->push_back(_ft->pipes_up[_tier + 1][_id][k][b]);
+                        r->push_back(_ft->queues_up[_tier + 1][_id][k][b]->getRemoteEndpoint());
                         _fib->addRoute(pkt.dst(),r,1,UP);
                     }
 
                     /*
-                      FatTreeSwitch* next = (FatTreeSwitch*)_ft->queues_nlp_nup[_id][k]->getRemoteEndpoint();
+                      XGFTSwitch* next = (XGFTSwitch*)_ft->queues_up[_tier + 1][_id][k]->getRemoteEndpoint();
                       assert (next->getType()==AGG && next->getID() == k);
                     */
                 }
@@ -465,13 +457,13 @@ Route* FatTreeSwitch::getNextHop(Packet& pkt, BaseQueue* ingress_port){
             //must go down!
             //target NLP id is 2 * pkt.dst()/K
             uint32_t target_tor = _ft->cfg().HOST_POD_SWITCH(pkt.dst());
-            for (uint32_t b = 0; b < _ft->cfg().bundlesize(AGG_TIER); b++) {
+            for (uint32_t b = 0; b < _ft->cfg().bundlesize(AGG_TIER[_tier]); b++) {
                 Route * r = new Route();
-                r->push_back(_ft->queues_nup_nlp[_id][target_tor][b]);
+                r->push_back(_ft->queues_down[_tier][_id][target_tor][b]);
                 assert(((BaseQueue*)r->at(0))->getSwitch() == this);
 
-                r->push_back(_ft->pipes_nup_nlp[_id][target_tor][b]);          
-                r->push_back(_ft->queues_nup_nlp[_id][target_tor][b]->getRemoteEndpoint());
+                r->push_back(_ft->pipes_down[_tier][_id][target_tor][b]);          
+                r->push_back(_ft->queues_down[_tier][_id][target_tor][b]->getRemoteEndpoint());
 
                 _fib->addRoute(pkt.dst(),r,1, DOWN);
             }
@@ -481,19 +473,19 @@ Route* FatTreeSwitch::getNextHop(Packet& pkt, BaseQueue* ingress_port){
                 _fib->setRoutes(pkt.dst(),_uproutes);
             else {
                 uint32_t podpos = _id % _ft->cfg().agg_switches_per_pod();
-                uint32_t uplink_bundles = _ft->cfg().radix_up(AGG_TIER) / _ft->cfg().bundlesize(CORE_TIER);
+                uint32_t uplink_bundles = _ft->cfg().radix_up(AGG_TIER[_tier]) / _ft->cfg().bundlesize(CORE_TIER);
                 for (uint32_t l = 0; l <  uplink_bundles ; l++) {
                     uint32_t core = l * _ft->cfg().agg_switches_per_pod() + podpos;
                     for (uint32_t b = 0; b < _ft->cfg().bundlesize(CORE_TIER); b++) {
                         Route *r = new Route();
-                        r->push_back(_ft->queues_nup_nc[_id][core][b]);
+                        r->push_back(_ft->queues_up[_tier + 1][_id][core][b]);
                         assert(((BaseQueue*)r->at(0))->getSwitch() == this);
 
-                        r->push_back(_ft->pipes_nup_nc[_id][core][b]);
-                        r->push_back(_ft->queues_nup_nc[_id][core][b]->getRemoteEndpoint());
+                        r->push_back(_ft->pipes_up[_tier + 1][_id][core][b]);
+                        r->push_back(_ft->queues_up[_tier + 1][_id][core][b]->getRemoteEndpoint());
 
                         /*
-                          FatTreeSwitch* next = (FatTreeSwitch*)_ft->queues_nup_nc[_id][k]->getRemoteEndpoint();
+                          XGFTSwitch* next = (XGFTSwitch*)_ft->queues_nup_nc[_id][k]->getRemoteEndpoint();
                           assert (next->getType()==CORE && next->getID() == k);
                         */
                     
