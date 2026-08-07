@@ -102,7 +102,7 @@ XGFTTopologyCfg::XGFTTopologyCfg(uint32_t tiers, uint32_t no_of_nodes, vector<ui
                                     simtime_picosec latency, simtime_picosec switch_latency, 
                                     queue_type q, queue_type snd):
                                     XGFTTopologyCfg(q, snd) {
-    initialize(tiers, no_of_children, no_of_parent, linkspeed, queuesize, latency, switch_latency, q, snd);
+    initialize(tiers, no_of_nodes, no_of_children, no_of_parent, linkspeed, queuesize, latency, switch_latency, q, snd);
 }
 
 /* TODO after
@@ -123,12 +123,10 @@ void XGFTTopologyCfg::initialize(uint32_t tiers, uint32_t no_of_nodes, vector<ui
     if (tiers == 1) {
         LAST_AGG_TIER = 0;
         CORE_TIER = 0;
-    }
-    if (tiers == 2) {
+    } else if (tiers == 2) {
         LAST_AGG_TIER = tiers-1;
         CORE_TIER = 0;
-    }                   
-    else { // tiers >= 3
+    } else { // tiers >= 3
         CORE_TIER = tiers-1;
         LAST_AGG_TIER = tiers-2;
     }
@@ -472,14 +470,14 @@ void XGFTTopologyCfg::set_params(uint32_t no_of_nodes, vector<uint32_t> no_of_ch
     for (int tier = TOR_TIER; tier <= _tiers-1; tier++) {
         cout << no_of_children[tier];
         if (tier < _tiers-1) {
-            cout << ", "
+            cout << ", ";
         }
     }
     cout << "; ";
     for (int tier = TOR_TIER; tier <= _tiers-1; tier++) {
         cout << no_of_parent[tier];
         if (tier < _tiers-1) {
-            cout << ", "
+            cout << ", ";
         }
     }
     cout << "]" <<endl;
@@ -849,8 +847,8 @@ XGFTTopology::XGFTTopology(const XGFTTopologyCfg* cfg,
                 }
                 queues_up[TOR_TIER][srv][tor][b] = alloc_src_queue(queueLogger);   
                 queues_up[TOR_TIER][srv][tor][b]->setName("SRC" + ntoa(srv) + "->LS" +ntoa(tor) + "(" + ntoa(b) + ")");
-                //cout << queues_ns_nlp[srv][tor][b]->str() << endl;
-                //if (logfile) logfile->writeName(*(queues_ns_nlp[srv][tor]));
+                //cout << queues_up[TOR_TIER][srv][tor][b]->str() << endl;
+                //if (logfile) logfile->writeName(*(queues_up[TOR_TIER][srv][tor]));
 
                 queues_up[TOR_TIER][srv][tor][b]->setRemoteEndpoint(switches[TOR_TIER][tor]);
 
@@ -1014,7 +1012,7 @@ XGFTTopology::XGFTTopology(const XGFTTopologyCfg* cfg,
         if (_cfg->_tiers >= 3){
             uint32_t last = _cfg->LAST_AGG_TIER;
             for (uint32_t agg = 0; agg < _cfg->NSW[last]; agg++) {
-                uint32_t base = _cfg->base_parent(low, last);
+                uint32_t base = _cfg->base_parent(agg, last);
                 for (uint32_t y=0; y < _cfg->_radix_up[last]; y++){
                     for (uint32_t b = 0; b < _cfg->_bundlesize[last + 1]; b++) {
                         // Downlink
@@ -1304,7 +1302,7 @@ vector<const Route*>* XGFTTopology::get_bidir_paths(uint32_t src, uint32_t dest,
             routeback->push_back(pipes_up[TOR_TIER][dest][_cfg->HOST_POD_SWITCH(dest)][0]);
 
             if (_cfg->_qt==LOSSLESS_INPUT || _cfg->_qt==LOSSLESS_INPUT_ECN)
-                routeback->push_back(queues_ns_nlp[dest][_cfg->HOST_POD_SWITCH(dest)][0]->getRemoteEndpoint());
+                routeback->push_back(queues_up[TOR_TIER][dest][_cfg->HOST_POD_SWITCH(dest)][0]->getRemoteEndpoint());
 
             routeback->push_back(queues_down[TOR_TIER][_cfg->HOST_POD_SWITCH(src)][src][0]);
             routeback->push_back(pipes_down[TOR_TIER][_cfg->HOST_POD_SWITCH(src)][src][0]);
