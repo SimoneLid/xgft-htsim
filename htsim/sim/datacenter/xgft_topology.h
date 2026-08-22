@@ -13,6 +13,7 @@
 #include "eventlist.h"
 #include "switch.h"
 #include <ostream>
+#include <cmath>
 #include <memory>
 #include <optional>
 
@@ -66,7 +67,7 @@ public:
     */
     void check_consistency() const;
 
-    void set_tier_parameters(int tier, int radix_up, int radix_down, mem_b queue_up, mem_b queue_down, int bundlesize, linkspeed_bps downlink_speed, int oversub);
+    void set_tier_parameters(int tier, int radix_up, int radix_down, mem_b queue_up, mem_b queue_down, int bundlesize, linkspeed_bps downlink_speed);
 
     void set_ecn_parameters(bool enable_ecn, bool enable_on_tor_downlink, mem_b ecn_low, mem_b ecn_high){
         _enable_ecn = enable_ecn;
@@ -99,7 +100,7 @@ public:
     void set_queue_sizes(mem_b queuesize);
 
     void set_params(uint32_t no_of_nodes, vector<uint32_t> no_of_children, vector<uint32_t> no_of_parent);
-    void set_custom_params(uint32_t no_of_nodes);
+    //void set_custom_params(uint32_t no_of_nodes); TODO after if we want
 
     uint32_t HOST_POD_SWITCH(uint32_t src) const {
         return src/_radix_down[TOR_TIER];
@@ -107,7 +108,7 @@ public:
 
     uint32_t lca_level(uint32_t src, uint32_t dest) const {
         //lowest common ancestor betweeen src and dest
-        for (uint32_t i = 0; i <= _tiers; ++i) {
+        for (uint32_t i = 1; i <= _tiers; ++i) {
             if (src / L[i] == dest / L[i]) {
                 return i - 1;
             }
@@ -116,11 +117,27 @@ public:
     }
 
     uint32_t base_parent(uint32_t src, uint32_t tier) const {
+        // in this case if i'm in the tier i, i need to call on the tier + 1, becuase the tier 0 consider host
+        // but it doesn't work with tier = 0 becuase _radix_up[0] is tor not host, for host use HOST_POD_SWITCH
         uint32_t q = src / W[tier];
         uint32_t r = src % W[tier];
-        uint32_t s = q / _radix_down[tier+1]; 
+        uint32_t s = q / _radix_down[tier]; 
 
-        return _radix_up[tier] * (s * W[tier] + r);
+        return _radix_up[tier - 1] * (s * W[tier] + r);
+    }
+
+    uint32_t down_child(uint32_t p, uint32_t tier, uint32_t dest) const {
+        // descending from p on tier, what is the unique child that leads to dest
+        if (tier == 0)
+            return dest;  // the child of a ToR is the host itself
+        uint32_t r = (p % W[tier + 1]) / _radix_up[tier - 1];
+        uint32_t q = dest / L[tier];
+        return q * W[tier] + r;
+    }
+
+    bool is_under(uint32_t v, uint32_t t, uint32_t x) const {
+        // check if the switch v, at tier t can reach host x going down
+        return (v / W[t + 1]) == (x / L[t + 1]);
     }
 
 
@@ -133,19 +150,34 @@ public:
     uint32_t queue_up(int tier) const {return _queue_up[tier];}
     uint32_t queue_down(int tier) const {return _queue_down[tier];}
 
-    // modified with the tier as input
-    int get_oversubscription_ratio(int tier){return _oversub[tier];}
+    // Ratio of downward to upward capacity at `tier`> 1 means that tier is oversubscribed
+    double oversub_ratio(uint32_t tier) const {
+        assert(tier < TOP_TIER);   // the top tier has no uplinks
+        double down = (double)_radix_down[tier] * _bundlesize[tier]     * _downlink_speeds[tier];
+        double up   = (double)_radix_up[tier]   * _bundlesize[tier + 1] * _downlink_speeds[tier + 1];
+        return down / up;
+    }
+
+    int get_oversubscription_ratio() const {
+        double ratio = 1.0;
+        for (uint32_t tier = TOR_TIER; tier < TOP_TIER; tier++) {
+            ratio *= oversub_ratio(tier);
+        }
+        return (int)ceil(ratio - 1e-9);
+    }
     
     
     simtime_picosec get_diameter_latency() {return _diameter_latency;}
-    simtime_picosec get_two_point_diameter_latency(int src, int dst);
+    // One-way latency of the shortest path between two hosts.  Callers double
+    // it to get the base RTT.
+    simtime_picosec get_two_point_diameter_latency(int src, int dst) const;
 
     uint16_t get_diameter() {return _diameter;}
 private:
     void initialize(uint32_t tiers, uint32_t no_of_nodes, vector<uint32_t> no_of_children, vector<uint32_t> no_of_parent, linkspeed_bps linkspeed, 
                     mem_b queuesize, simtime_picosec latency, simtime_picosec switch_latency, 
                     queue_type q, queue_type snd);
-    void read_cfg(istream& file, mem_b queuesize);
+    //void read_cfg(istream& file, mem_b queuesize); TODO AFTER for now there is no load
 
     bool _from_file;
 
@@ -155,11 +187,17 @@ private:
     // unified in a vector NSW[_tiers] to be accessed easily
     vector<uint32_t> NSW;
     vector<uint32_t> W;
+    vector<uint32_t> L;
     uint32_t NSRV;
 
     uint32_t _tiers;
 
+    // Index of the highest tier, always _tiers-1
+    uint32_t TOP_TIER;
+
     uint32_t LAST_AGG_TIER;
+
+    // Only meaningful when _tiers >= 3: a 1- or 2-tier fabric has no core tier
     uint32_t CORE_TIER;
 
 
@@ -181,9 +219,6 @@ private:
     // Eg. _downlink_speeds[0] = 400Gbps indicates 400Gbps links from hosts
     // to ToRs.
     vector<linkspeed_bps> _downlink_speeds;
-
-    // degree of oversubscription at tier.  Eg _oversub[TOR_TIER] = 3 implies 3x more bw to hosts than to agg switches.
-    vector<uint32_t> _oversub;
 
     // switch radix used.  Eg _radix_down[0] = 32 indicates 32 downlinks from ToRs.  _radix_up[2] should be zero in a 3-tier topology.  
     vector<uint32_t> _radix_down;
@@ -245,10 +280,10 @@ public:
     BaseQueue* alloc_queue(QueueLogger* q, const mem_b queuesize, link_direction dir, int switch_tier, bool tor=false);
     BaseQueue* alloc_queue(QueueLogger* q, linkspeed_bps speed, const mem_b queuesize, link_direction dir,  int switch_tier, bool tor, bool reduced_speed);
     void count_queue(Queue*);
-    void print_path(std::ofstream& paths,uint32_t src,const Route* route);
+    //void print_path(std::ofstream& paths,uint32_t src,const Route* route);
     vector<uint32_t>* get_neighbours(uint32_t src) { return NULL;};
 
-    void add_failed_link(uint32_t tier, uint32_t type, uint32_t switch_id, uint32_t link_id);
+    //void add_failed_link(uint32_t tier, uint32_t type, uint32_t switch_id, uint32_t link_id); TODO
 
     // add loggers to record total queue size at switches
     virtual void add_switch_loggers(Logfile& log, simtime_picosec sample_period); 
@@ -257,11 +292,18 @@ public:
 private:
     const XGFTTopologyCfg* _cfg;
     map<Queue*,int> _link_usage;
-    int64_t find_lp_switch(Queue* queue);
-    int64_t find_up_switch(Queue* queue);
-    int64_t find_core_switch(Queue* queue);
-    int64_t find_destination(Queue* queue);
+    //int64_t find_lp_switch(Queue* queue);
+    //int64_t find_up_switch(Queue* queue);
+    //int64_t find_core_switch(Queue* queue);
+    //int64_t find_destination(Queue* queue);
     void alloc_vectors();
+
+    // route construction
+    void push_hop(Route* rt, BaseQueue* queue, Pipe* pipe);
+    void add_up_hops(Route* rt, uint32_t host, const vector<uint32_t>& sw,
+                     const vector<uint32_t>& bundle, uint32_t top_tier);
+    void add_down_hops(Route* rt, uint32_t host, const vector<uint32_t>& sw,
+                       const vector<uint32_t>& bundle, uint32_t top_tier);
 };
 
 #endif

@@ -59,7 +59,7 @@ class XGFTTopology;
         c -= a; c -= b; c ^= (b >> 15);         \
     } while (/*CONSTCOND*/0)
 
-static inline uint32_t freeBSDHash(uint32_t target1, uint32_t target2 = 0, uint32_t target3 = 0)
+static inline uint32_t freeBSDHashXgft(uint32_t target1, uint32_t target2 = 0, uint32_t target3 = 0)
 {
     uint32_t a = 0x9e3779b9, b = 0x9e3779b9, c = 0; // hask key
         
@@ -72,12 +72,12 @@ static inline uint32_t freeBSDHash(uint32_t target1, uint32_t target2 = 0, uint3
 
 #undef MIX
 
-class FlowletInfo {
+class FlowletInfoXgft {
 public:
     uint32_t _egress;
     simtime_picosec _last;
 
-    FlowletInfo(uint32_t egress,simtime_picosec lasttime) {_egress = egress; _last = lasttime;};
+    FlowletInfoXgft(uint32_t egress,simtime_picosec lasttime) {_egress = egress; _last = lasttime;};
 
 };
 
@@ -95,7 +95,7 @@ public:
         PER_PACKET = 0, PER_FLOWLET = 1
     };
 
-    XGFTSwitch(EventList& eventlist, string s, switch_type t, uint32_t id, uint32_t tier, simtime_picosec switch_delay, FatTreeTopology* ft);
+    XGFTSwitch(EventList& eventlist, string s, switch_type t, uint32_t index, uint32_t tier, simtime_picosec switch_delay, XGFTTopology* ft);
     ~XGFTSwitch() override;
   
     virtual void receivePacket(Packet& pkt);
@@ -136,12 +136,17 @@ private:
     switch_type _type;
     Pipe* _pipe;
     uint32_t _tier;
+
+    // this switch's position within its tier.  NOT unique across tiers, use
+    // the inherited _id (getID()) whenever a globally unique switch identity is
+    // needed, as the PFC/ETH_PAUSE path does.
+    uint32_t _index;
     XGFTTopology* _ft;
     
     //CAREFUL: can't always have a single FIB for all up destinations when there are failures!
     vector<FibEntry*>* _uproutes;
 
-    unordered_map<uint32_t,FlowletInfo*> _flowlet_maps;
+    unordered_map<uint32_t,FlowletInfoXgft*> _flowlet_maps;
 
     static unordered_map<BaseQueue*,uint32_t> _port_flow_counts;
 

@@ -8,8 +8,8 @@
 
 unordered_map<BaseQueue*,uint32_t> XGFTSwitch::_port_flow_counts;
 
-XGFTSwitch::XGFTSwitch(EventList& eventlist, string s, switch_type t, uint32_t id, uint32_t tier, simtime_picosec delay, XGFTTopology* ft): Switch(eventlist, s) {
-    _id = id;
+XGFTSwitch::XGFTSwitch(EventList& eventlist, string s, switch_type t, uint32_t index, uint32_t tier, simtime_picosec delay, XGFTTopology* ft): Switch(eventlist, s) {
+    _index = index;
     _type = t;
     _pipe = new CallbackPipe(delay,eventlist, this);
     _uproutes = NULL;
@@ -58,15 +58,15 @@ void XGFTSwitch::receivePacket(Packet& pkt){
         _packets.erase(&pkt);
         
         //egress queue processing.
-        //cout << "Switch type " << _type <<  " id " << _id << " pkt dst " << pkt.dst() << " dir " << pkt.get_direction() << endl;
+        //cout << "Switch type " << _type <<  " id " << _index << " pkt dst " << pkt.dst() << " dir " << pkt.get_direction() << endl;
         pkt.sendOn();
     }
 };
 
 void XGFTSwitch::addHostPort(int addr, int flowid, PacketSink* transport_port){
     Route* rt = new Route();
-    rt->push_back(_ft->queues_nlp_ns[_ft->cfg().HOST_POD_SWITCH(addr)][addr][0]);
-    rt->push_back(_ft->pipes_nlp_ns[_ft->cfg().HOST_POD_SWITCH(addr)][addr][0]);
+    rt->push_back(_ft->queues_down[TOR_TIER][_ft->cfg().HOST_POD_SWITCH(addr)][addr][0]);
+    rt->push_back(_ft->pipes_down[TOR_TIER][_ft->cfg().HOST_POD_SWITCH(addr)][addr][0]);
     rt->push_back(transport_port);
     _fib->addHostRoute(addr,rt,flowid);
 }
@@ -296,7 +296,7 @@ int8_t XGFTSwitch::compare_qb(FibEntry* left, FibEntry* right){
     return compare_bandwidth(left,right);
 }
 
-int8_t XFGTSwitch::compare_pb(FibEntry* left, FibEntry* right){
+int8_t XGFTSwitch::compare_pb(FibEntry* left, FibEntry* right){
     //compare pause, queuesize, bandwidth.
     int8_t p = compare_pause(left, right);
 
@@ -337,12 +337,12 @@ Route* XGFTSwitch::getNextHop(Packet& pkt, BaseQueue* ingress_port){
             case NIX:
                 abort();
             case ECMP:
-                ecmp_choice = freeBSDHash(pkt.flow_id(),pkt.pathid(),_hash_salt) % available_hops->size();
+                ecmp_choice = freeBSDHashXgft(pkt.flow_id(),pkt.pathid(),_hash_salt) % available_hops->size();
                 break;
             case ADAPTIVE_ROUTING:
                 if (pkt.size() < 100) {
                     // don't bother adaptive routing the small packets - don't want to pollute the tables
-                    ecmp_choice = freeBSDHash(pkt.flow_id(),pkt.pathid(),_hash_salt) % available_hops->size();
+                    ecmp_choice = freeBSDHashXgft(pkt.flow_id(),pkt.pathid(),_hash_salt) % available_hops->size();
                     break;
                 }
                 if (_ar_sticky==XGFTSwitch::PER_PACKET){
@@ -350,7 +350,7 @@ Route* XGFTSwitch::getNextHop(Packet& pkt, BaseQueue* ingress_port){
                 } 
                 else if (_ar_sticky==XGFTSwitch::PER_FLOWLET){     
                     if (_flowlet_maps.find(pkt.flow_id())!=_flowlet_maps.end()){
-                        FlowletInfo* f = _flowlet_maps[pkt.flow_id()];
+                        FlowletInfoXgft* f = _flowlet_maps[pkt.flow_id()];
                         
                         // only reroute an existing flow if its inter packet time is larger than _sticky_delta and
                         // and
@@ -362,7 +362,7 @@ Route* XGFTSwitch::getNextHop(Packet& pkt, BaseQueue* ingress_port){
                             if (fn(available_hops->at(f->_egress),available_hops->at(new_route)) < 0){
                                 f->_egress = new_route;
                                 _last_choice = eventlist().now();
-                                //cout << "Switch " << _type << ":" << _id << " choosing new path "<<  f->_egress << " for " << pkt.flow_id() << " at " << timeAsUs(eventlist().now()) << " last is " << timeAsUs(f->_last) << endl;
+                                //cout << "Switch " << _type << ":" << _index << " choosing new path "<<  f->_egress << " for " << pkt.flow_id() << " at " << timeAsUs(eventlist().now()) << " last is " << timeAsUs(f->_last) << endl;
                             }
                         }
                         ecmp_choice = f->_egress;
@@ -374,19 +374,19 @@ Route* XGFTSwitch::getNextHop(Packet& pkt, BaseQueue* ingress_port){
                         ecmp_choice = adaptive_route(available_hops,fn); 
                         _last_choice = eventlist().now();
 
-                        _flowlet_maps[pkt.flow_id()] = new FlowletInfo(ecmp_choice,eventlist().now());
+                        _flowlet_maps[pkt.flow_id()] = new FlowletInfoXgft(ecmp_choice,eventlist().now());
                     }
                 }
 
                 break;
             case ECMP_ADAPTIVE:
-                ecmp_choice = freeBSDHash(pkt.flow_id(),pkt.pathid(),_hash_salt) % available_hops->size();
+                ecmp_choice = freeBSDHashXgft(pkt.flow_id(),pkt.pathid(),_hash_salt) % available_hops->size();
                 if (random()%100 < 50)
                     ecmp_choice = replace_worst_choice(available_hops,fn, ecmp_choice);
                 break;
             case RR:
                 if (pkt.size()<128)
-                    ecmp_choice = freeBSDHash(pkt.flow_id(),pkt.pathid(),_hash_salt) % available_hops->size();
+                    ecmp_choice = freeBSDHashXgft(pkt.flow_id(),pkt.pathid(),_hash_salt) % available_hops->size();
                 else {
                     if (_crt_route>=1*available_hops->size()){
                         _crt_route = 0;
@@ -405,7 +405,7 @@ Route* XGFTSwitch::getNextHop(Packet& pkt, BaseQueue* ingress_port){
                     ecmp_choice = _crt_route % available_hops->size();
                     _crt_route ++;
                 }
-                else ecmp_choice = freeBSDHash(pkt.flow_id(),pkt.pathid(),_hash_salt) % available_hops->size();
+                else ecmp_choice = freeBSDHashXgft(pkt.flow_id(),pkt.pathid(),_hash_salt) % available_hops->size();
                 
                 break;
             }
@@ -418,7 +418,7 @@ Route* XGFTSwitch::getNextHop(Packet& pkt, BaseQueue* ingress_port){
 
     //no route table entries for this destination. Add them to FIB or fail. 
     if (_type == TOR){
-        if ( _ft->cfg().HOST_POD_SWITCH(pkt.dst()) == _id) { 
+        if ( _ft->cfg().HOST_POD_SWITCH(pkt.dst()) == _index) { 
             //this host is directly connected!
             HostFibEntry* fe = _fib->getHostRoute(pkt.dst(),pkt.flow_id());
             assert(fe);
@@ -429,22 +429,22 @@ Route* XGFTSwitch::getNextHop(Packet& pkt, BaseQueue* ingress_port){
             if (_uproutes)
                 _fib->setRoutes(pkt.dst(),_uproutes);
             else {
-                par_min = _ft->cfg().MIN_PARENT_SWITCH(_id);
-                par_max = _ft->cfg().MAX_PARENT_SWITCH(_id);
+                uint32_t base = _ft->cfg().base_parent(_index, _tier + 1);
 
-                for (uint32_t k=par_min; k<=par_max;k++){
-                    for (uint32_t b = 0; b < _ft->cfg().get_bundlesize(_tier); b++) {
+                for (uint32_t k=0; k < _ft->cfg().radix_up(_tier); k++){
+                    for (uint32_t b = 0; b < _ft->cfg().bundlesize(_tier+1); b++) {
+                        uint32_t j = base + k;
                         Route * r = new Route();
-                        r->push_back(_ft->queues_up[_tier + 1][_id][k][b]);
+                        r->push_back(_ft->queues_up[_tier + 1][_index][j][b]);
                         assert(((BaseQueue*)r->at(0))->getSwitch() == this);
 
-                        r->push_back(_ft->pipes_up[_tier + 1][_id][k][b]);
-                        r->push_back(_ft->queues_up[_tier + 1][_id][k][b]->getRemoteEndpoint());
+                        r->push_back(_ft->pipes_up[_tier + 1][_index][j][b]);
+                        r->push_back(_ft->queues_up[_tier + 1][_index][j][b]->getRemoteEndpoint());
                         _fib->addRoute(pkt.dst(),r,1,UP);
                     }
 
                     /*
-                      XGFTSwitch* next = (XGFTSwitch*)_ft->queues_up[_tier + 1][_id][k]->getRemoteEndpoint();
+                      XGFTSwitch* next = (XGFTSwitch*)_ft->queues_up[_tier + 1][_index][k]->getRemoteEndpoint();
                       assert (next->getType()==AGG && next->getID() == k);
                     */
                 }
@@ -453,17 +453,16 @@ Route* XGFTSwitch::getNextHop(Packet& pkt, BaseQueue* ingress_port){
             }
         }
     } else if (_type == AGG) {
-        if (_ft->cfg().get_tiers()==2 || _ft->cfg().HOST_POD(pkt.dst()) == _ft->cfg().AGG_SWITCH_POD_ID(_id)) {
+        if (_ft->cfg().is_under(_index, _tier, pkt.dst())) {
             //must go down!
-            //target NLP id is 2 * pkt.dst()/K
-            uint32_t target_tor = _ft->cfg().HOST_POD_SWITCH(pkt.dst());
-            for (uint32_t b = 0; b < _ft->cfg().bundlesize(AGG_TIER[_tier]); b++) {
+            uint32_t sw_down = _ft->cfg().down_child(_index, _tier, pkt.dst());
+            for (uint32_t b = 0; b < _ft->cfg().bundlesize(_tier); b++) {
                 Route * r = new Route();
-                r->push_back(_ft->queues_down[_tier][_id][target_tor][b]);
+                r->push_back(_ft->queues_down[_tier][_index][sw_down][b]);
                 assert(((BaseQueue*)r->at(0))->getSwitch() == this);
 
-                r->push_back(_ft->pipes_down[_tier][_id][target_tor][b]);          
-                r->push_back(_ft->queues_down[_tier][_id][target_tor][b]->getRemoteEndpoint());
+                r->push_back(_ft->pipes_down[_tier][_index][sw_down][b]);          
+                r->push_back(_ft->queues_down[_tier][_index][sw_down][b]->getRemoteEndpoint());
 
                 _fib->addRoute(pkt.dst(),r,1, DOWN);
             }
@@ -472,26 +471,25 @@ Route* XGFTSwitch::getNextHop(Packet& pkt, BaseQueue* ingress_port){
             if (_uproutes)
                 _fib->setRoutes(pkt.dst(),_uproutes);
             else {
-                uint32_t podpos = _id % _ft->cfg().agg_switches_per_pod();
-                uint32_t uplink_bundles = _ft->cfg().radix_up(AGG_TIER[_tier]) / _ft->cfg().bundlesize(CORE_TIER);
-                for (uint32_t l = 0; l <  uplink_bundles ; l++) {
-                    uint32_t core = l * _ft->cfg().agg_switches_per_pod() + podpos;
-                    for (uint32_t b = 0; b < _ft->cfg().bundlesize(CORE_TIER); b++) {
+                uint32_t base = _ft->cfg().base_parent(_index, _tier + 1);
+                for (uint32_t k=0; k < _ft->cfg().radix_up(_tier); k++){
+                    for (uint32_t b = 0; b < _ft->cfg().bundlesize(_tier+1); b++) {
+                        uint32_t core = base + k; 
                         Route *r = new Route();
-                        r->push_back(_ft->queues_up[_tier + 1][_id][core][b]);
+                        r->push_back(_ft->queues_up[_tier + 1][_index][core][b]);
                         assert(((BaseQueue*)r->at(0))->getSwitch() == this);
 
-                        r->push_back(_ft->pipes_up[_tier + 1][_id][core][b]);
-                        r->push_back(_ft->queues_up[_tier + 1][_id][core][b]->getRemoteEndpoint());
+                        r->push_back(_ft->pipes_up[_tier + 1][_index][core][b]);
+                        r->push_back(_ft->queues_up[_tier + 1][_index][core][b]->getRemoteEndpoint());
 
                         /*
-                          XGFTSwitch* next = (XGFTSwitch*)_ft->queues_nup_nc[_id][k]->getRemoteEndpoint();
+                          XGFTSwitch* next = (XGFTSwitch*)_ft->queues_up[_tier + 1][_index][k]->getRemoteEndpoint();
                           assert (next->getType()==CORE && next->getID() == k);
                         */
                     
                         _fib->addRoute(pkt.dst(),r,1,UP);
 
-                        //cout << "AGG switch " << _id << " adding route to " << pkt.dst() << " via CORE " << k << " bundle_id " << b << endl;
+                        //cout << "AGG switch " << _index << " adding route to " << pkt.dst() << " via CORE " << k << " bundle_id " << b << endl;
                     }
                 }
                 //_uproutes = _fib->getRoutes(pkt.dst());
@@ -499,19 +497,19 @@ Route* XGFTSwitch::getNextHop(Packet& pkt, BaseQueue* ingress_port){
             }
         }
     } else if (_type == CORE) {
-        uint32_t nup = _ft->cfg().MIN_POD_AGG_SWITCH(_ft->cfg().HOST_POD(pkt.dst())) + (_id % _ft->cfg().agg_switches_per_pod());
-        for (uint32_t b = 0; b < _ft->cfg().bundlesize(CORE_TIER); b++) {
+        uint32_t nup = _ft->cfg().down_child(_index, _tier, pkt.dst());
+        for (uint32_t b = 0; b < _ft->cfg().bundlesize(_tier); b++) {
             Route *r = new Route();
-            //cout << "CORE switch " << _id << " adding route to " << pkt.dst() << " via AGG " << nup << endl;
+            //cout << "CORE switch " << _index << " adding route to " << pkt.dst() << " via AGG " << nup << endl;
 
-            assert (_ft->queues_nc_nup[_id][nup][b]);
-            r->push_back(_ft->queues_nc_nup[_id][nup][b]);
+            assert (_ft->queues_down[_tier][_index][nup][b]);
+            r->push_back(_ft->queues_down[_tier][_index][nup][b]);
             assert(((BaseQueue*)r->at(0))->getSwitch() == this);
 
-            assert (_ft->pipes_nc_nup[_id][nup][b]);
-            r->push_back(_ft->pipes_nc_nup[_id][nup][b]);
+            assert (_ft->pipes_down[_tier][_index][nup][b]);
+            r->push_back(_ft->pipes_down[_tier][_index][nup][b]);
 
-            r->push_back(_ft->queues_nc_nup[_id][nup][b]->getRemoteEndpoint());
+            r->push_back(_ft->queues_down[_tier][_index][nup][b]->getRemoteEndpoint());
             _fib->addRoute(pkt.dst(),r,1,DOWN);
         }
     }

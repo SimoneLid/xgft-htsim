@@ -25,8 +25,8 @@
 #include "oversubscribed_cc.h"
 
 
-#include "fat_tree_topology.h"
-#include "fat_tree_switch.h"
+#include "xgft_topology.h"
+#include "xgft_switch.h"
 
 #include <list>
 
@@ -48,7 +48,9 @@ void exit_error(char* progr) {
     exit(1);
 }
 
-simtime_picosec calculate_rtt(FatTreeTopologyCfg* t_cfg, linkspeed_bps host_linkspeed) { 
+//usage -xgft "4;2,1,4,2;1,4,1,2"
+
+simtime_picosec calculate_rtt(XGFTTopologyCfg* t_cfg, linkspeed_bps host_linkspeed) { 
     /*
     Using the host linkspeed here is not very accurate, but hopefully good enough for this usecase.
     */
@@ -59,7 +61,7 @@ simtime_picosec calculate_rtt(FatTreeTopologyCfg* t_cfg, linkspeed_bps host_link
     return rtt;
 };
 
-uint32_t calculate_bdp_pkt(FatTreeTopologyCfg* t_cfg, linkspeed_bps host_linkspeed) {
+uint32_t calculate_bdp_pkt(XGFTTopologyCfg* t_cfg, linkspeed_bps host_linkspeed) {
     simtime_picosec rtt = calculate_rtt(t_cfg, host_linkspeed);
     uint32_t bdp_pkt = ceil((timeAsSec(rtt) * (host_linkspeed/8)) / (double)Packet::data_packet_size()); 
 
@@ -74,7 +76,10 @@ int main(int argc, char **argv) {
     int packet_size = 4150;
     uint32_t path_entropy_size = 64;
     uint32_t cwnd = 0, no_of_nodes = 0;
-    uint32_t tiers = 3; // we support 2 and 3 tier fattrees
+    uint32_t tiers = 3; // default case, overwritten by -xgft
+
+    vector<uint32_t> no_of_children, no_of_parent;
+    uint32_t xgft_hosts = 0;   // hosts implied by -xgft, 0 until it is parsed
     uint32_t planes = 1;  // multi-plane topologies
     uint32_t ports = 1;  // ports per NIC
     bool disable_trim = false; // Disable trimming, drop instead
@@ -126,7 +131,7 @@ int main(int argc, char **argv) {
     queue_type snd_type = FAIR_PRIO;
 
     float ar_sticky_delta = 10;
-    FatTreeSwitch::sticky_choices ar_sticky = FatTreeSwitch::PER_PACKET;
+    XGFTSwitch::sticky_choices ar_sticky = XGFTSwitch::PER_PACKET;
 
     char* tm_file = NULL;
     char* topo_file = NULL;
@@ -149,10 +154,87 @@ int main(int argc, char **argv) {
             no_of_nodes = atoi(argv[i+1]);
             cout << "no_of_nodes "<<no_of_nodes << endl;
             i++;
-        } else if (!strcmp(argv[i],"-tiers")) {
-            tiers = atoi(argv[i+1]);
-            cout << "tiers " << tiers << endl;
-            assert(tiers == 2 || tiers == 3);
+        } else if (!strcmp(argv[i],"-xgft")) {
+            // Topology shape as XGFT(h; m_1,...,m_h; w_1,...,w_h):
+            //   h    number of switch tiers
+            //   m_k  children of a tier k-1 switch (m_1 = hosts per ToR)
+            //   w_k  parents of a tier k-1 node   (w_1 = ToRs per host, must be 1)
+            // Surrounding [] are ignored and ':' is accepted in place of ';',
+            if (i+1 >= argc) {
+                cerr << "-xgft needs an argument, eg. -xgft \"3;4,2,2;1,2,2\"" << endl;
+                exit(1);
+            }
+
+            string spec;
+            for (const char* p = argv[i+1]; *p; p++) {
+                if (*p=='[' || *p==']' || *p==' ' || *p=='\t')
+                    continue;
+                spec += (*p==':') ? ';' : *p;
+            }
+
+            vector<string> fields;
+            {
+                stringstream ss(spec);
+                string f;
+                while (getline(ss, f, ';'))
+                    fields.push_back(f);
+            }
+            if (fields.size() != 3) {
+                cerr << "-xgft expects h;m_1,...,m_h;w_1,...,w_h but \"" << argv[i+1]
+                     << "\" has " << fields.size() << " ';'-separated field(s)" << endl;
+                exit(1);
+            }
+
+            int h = atoi(fields[0].c_str());
+            if (h < 1) {
+                cerr << "-xgft: number of tiers must be at least 1, got \"" << fields[0]
+                     << "\"" << endl;
+                exit(1);
+            }
+            tiers = (uint32_t)h;
+
+            // parse a comma separated list and check it has exactly `tiers` entries
+            auto parse_list = [](const string& list, const char* what, uint32_t expected) {
+                vector<uint32_t> v;
+                stringstream ls(list);
+                string tok;
+                while (getline(ls, tok, ',')) {
+                    int val = atoi(tok.c_str());
+                    if (val < 1) {
+                        cerr << "-xgft: every " << what << " entry must be >= 1, got \""
+                             << tok << "\"" << endl;
+                        exit(1);
+                    }
+                    v.push_back((uint32_t)val);
+                }
+                if (v.size() != expected) {
+                    cerr << "-xgft: " << what << " has " << v.size()
+                         << " entries but h is " << expected << endl;
+                    exit(1);
+                }
+                return v;
+            };
+
+            no_of_children = parse_list(fields[1], "m (no_of_children)", tiers);
+            no_of_parent   = parse_list(fields[2], "w (no_of_parent)", tiers);
+
+            // w_1 > 1 would mean multi-homed hosts, not supported
+            if (no_of_parent[0] != 1) {
+                cerr << "-xgft: w_1 must be 1 - multi-homed hosts are not supported (got "
+                     << no_of_parent[0] << ")" << endl;
+                exit(1);
+            }
+
+            xgft_hosts = 1;
+            for (uint32_t t = 0; t < tiers; t++)
+                xgft_hosts *= no_of_children[t];
+
+            cout << "XGFT(" << tiers << "; ";
+            for (uint32_t t = 0; t < tiers; t++)
+                cout << no_of_children[t] << (t+1 < tiers ? "," : "; ");
+            for (uint32_t t = 0; t < tiers; t++)
+                cout << no_of_parent[t] << (t+1 < tiers ? "," : "");
+            cout << ") -> " << xgft_hosts << " hosts" << endl;
             i++;
         } else if (!strcmp(argv[i],"-planes")) {
             planes = atoi(argv[i+1]);
@@ -320,7 +402,7 @@ int main(int argc, char **argv) {
             i++;
         } else if (!strcmp(argv[i],"-topo")){
             topo_file = argv[i+1];
-            cout << "FatTree topology input file: "<< topo_file << endl;
+            cout << "XGFT topology input file: "<< topo_file << endl;
             i++;
         } else if (!strcmp(argv[i],"-q")){
             param_queuesize_set = true;
@@ -431,9 +513,9 @@ int main(int argc, char **argv) {
             i++;
         } else if (!strcmp(argv[i],"-ar_granularity")){
             if (!strcmp(argv[i+1],"packet"))
-                ar_sticky = FatTreeSwitch::PER_PACKET;
+                ar_sticky = XGFTSwitch::PER_PACKET;
             else if (!strcmp(argv[i+1],"flow"))
-                ar_sticky = FatTreeSwitch::PER_FLOWLET;
+                ar_sticky = XGFTSwitch::PER_FLOWLET;
             else  {
                 cout << "Expecting -ar_granularity packet|flow, found " << argv[i+1] << endl;
                 exit(1);
@@ -442,31 +524,31 @@ int main(int argc, char **argv) {
         } else if (!strcmp(argv[i],"-ar_method")){
             if (!strcmp(argv[i+1],"pause")){
                 cout << "Adaptive routing based on pause state " << endl;
-                FatTreeSwitch::fn = &FatTreeSwitch::compare_pause;
+                XGFTSwitch::fn = &XGFTSwitch::compare_pause;
             }
             else if (!strcmp(argv[i+1],"queue")){
                 cout << "Adaptive routing based on queue size " << endl;
-                FatTreeSwitch::fn = &FatTreeSwitch::compare_queuesize;
+                XGFTSwitch::fn = &XGFTSwitch::compare_queuesize;
             }
             else if (!strcmp(argv[i+1],"bandwidth")){
                 cout << "Adaptive routing based on bandwidth utilization " << endl;
-                FatTreeSwitch::fn = &FatTreeSwitch::compare_bandwidth;
+                XGFTSwitch::fn = &XGFTSwitch::compare_bandwidth;
             }
             else if (!strcmp(argv[i+1],"pqb")){
                 cout << "Adaptive routing based on pause, queuesize and bandwidth utilization " << endl;
-                FatTreeSwitch::fn = &FatTreeSwitch::compare_pqb;
+                XGFTSwitch::fn = &XGFTSwitch::compare_pqb;
             }
             else if (!strcmp(argv[i+1],"pq")){
                 cout << "Adaptive routing based on pause, queuesize" << endl;
-                FatTreeSwitch::fn = &FatTreeSwitch::compare_pq;
+                XGFTSwitch::fn = &XGFTSwitch::compare_pq;
             }
             else if (!strcmp(argv[i+1],"pb")){
                 cout << "Adaptive routing based on pause, bandwidth utilization" << endl;
-                FatTreeSwitch::fn = &FatTreeSwitch::compare_pb;
+                XGFTSwitch::fn = &XGFTSwitch::compare_pb;
             }
             else if (!strcmp(argv[i+1],"qb")){
                 cout << "Adaptive routing based on queuesize, bandwidth utilization" << endl;
-                FatTreeSwitch::fn = &FatTreeSwitch::compare_qb; 
+                XGFTSwitch::fn = &XGFTSwitch::compare_qb; 
             }
             else {
                 cout << "Unknown AR method expecting one of pause, queue, bandwidth, pqb, pq, pb, qb" << endl;
@@ -476,40 +558,40 @@ int main(int argc, char **argv) {
         } else if (!strcmp(argv[i],"-strat")){
             if (!strcmp(argv[i+1], "ecmp_host")) {
                 route_strategy = ECMP_FIB;
-                FatTreeSwitch::set_strategy(FatTreeSwitch::ECMP);
+                XGFTSwitch::set_strategy(XGFTSwitch::ECMP);
             } else if (!strcmp(argv[i+1], "rr_ecmp")) {
                 //this is the host route strategy;
                 route_strategy = ECMP_FIB_ECN;
                 qt = COMPOSITE_ECN_LB;
                 //this is the switch route strategy. 
-                FatTreeSwitch::set_strategy(FatTreeSwitch::RR_ECMP);
+                XGFTSwitch::set_strategy(XGFTSwitch::RR_ECMP);
             } else if (!strcmp(argv[i+1], "ecmp_host_ecn")) {
                 route_strategy = ECMP_FIB_ECN;
-                FatTreeSwitch::set_strategy(FatTreeSwitch::ECMP);
+                XGFTSwitch::set_strategy(XGFTSwitch::ECMP);
                 qt = COMPOSITE_ECN_LB;
             } else if (!strcmp(argv[i+1], "reactive_ecn")) {
                 // Jitu's suggestion for something really simple
                 // One path at a time, but switch whenever we get a trim or ecn
                 //this is the host route strategy;
                 route_strategy = REACTIVE_ECN;
-                FatTreeSwitch::set_strategy(FatTreeSwitch::ECMP);
+                XGFTSwitch::set_strategy(XGFTSwitch::ECMP);
                 qt = COMPOSITE_ECN_LB;
             } else if (!strcmp(argv[i+1], "ecmp_ar")) {
                 route_strategy = ECMP_FIB;
                 path_entropy_size = 1;
-                FatTreeSwitch::set_strategy(FatTreeSwitch::ADAPTIVE_ROUTING);
+                XGFTSwitch::set_strategy(XGFTSwitch::ADAPTIVE_ROUTING);
             } else if (!strcmp(argv[i+1], "ecmp_host_ar")) {
                 route_strategy = ECMP_FIB;
-                FatTreeSwitch::set_strategy(FatTreeSwitch::ECMP_ADAPTIVE);
+                XGFTSwitch::set_strategy(XGFTSwitch::ECMP_ADAPTIVE);
                 //the stuff below obsolete
-                //FatTreeSwitch::set_ar_fraction(atoi(argv[i+2]));
+                //XGFTSwitch::set_ar_fraction(atoi(argv[i+2]));
                 //cout << "AR fraction: " << atoi(argv[i+2]) << endl;
                 //i++;
             } else if (!strcmp(argv[i+1], "ecmp_rr")) {
                 // switch round robin
                 route_strategy = ECMP_FIB;
                 path_entropy_size = 1;
-                FatTreeSwitch::set_strategy(FatTreeSwitch::RR);
+                XGFTSwitch::set_strategy(XGFTSwitch::RR);
             }
             i++;
         } else {
@@ -542,18 +624,18 @@ int main(int argc, char **argv) {
 
     if (route_strategy==NOT_SET){
         route_strategy = ECMP_FIB;
-        FatTreeSwitch::set_strategy(FatTreeSwitch::ECMP);
+        XGFTSwitch::set_strategy(XGFTSwitch::ECMP);
     }
 
     /*
     UecSink::_oversubscribed_congestion_control = oversubscribed_congestion_control;
     */
 
-    FatTreeSwitch::_ar_sticky = ar_sticky;
-    FatTreeSwitch::_sticky_delta = timeFromUs(ar_sticky_delta);
-    FatTreeSwitch::_ecn_threshold_fraction = ecn_thresh;
-    FatTreeSwitch::_disable_trim = disable_trim;
-    FatTreeSwitch::_trim_size = trimsize;
+    XGFTSwitch::_ar_sticky = ar_sticky;
+    XGFTSwitch::_sticky_delta = timeFromUs(ar_sticky_delta);
+    XGFTSwitch::_ecn_threshold_fraction = ecn_thresh;
+    XGFTSwitch::_disable_trim = disable_trim;
+    XGFTSwitch::_trim_size = trimsize;
 
     eventlist.setEndtime(timeFromUs((uint32_t)end_time));
 
@@ -650,6 +732,12 @@ int main(int argc, char **argv) {
 
     no_of_nodes = conns->N;
 
+    if (xgft_hosts != 0 && xgft_hosts != no_of_nodes) {
+        cerr << "-xgft describes " << xgft_hosts << " hosts but the connection matrix has "
+             << no_of_nodes << endl;
+        exit(1);
+    }
+
     if (!param_queuesize_set) {
         cout << "Automatic queue sizing enabled ";        
         if (queue_size_bdp_factor==0) {
@@ -665,19 +753,26 @@ int main(int argc, char **argv) {
              << endl;
     }
 
-    unique_ptr<FatTreeTopologyCfg> topo_cfg;
+    unique_ptr<XGFTTopologyCfg> topo_cfg;
     if (topo_file) {
-        topo_cfg = FatTreeTopologyCfg::load(topo_file, memFromPkt(queuesize_pkt), qt, snd_type);
+        //not implemented for now
+        /*topo_cfg = XGFTTopologyCfg::load(topo_file, memFromPkt(queuesize_pkt), qt, snd_type);
 
         if (topo_cfg->no_of_nodes() != no_of_nodes) {
             cerr << "Mismatch between connection matrix (" << no_of_nodes << " nodes) and topology ("
                     << topo_cfg->no_of_nodes() << " nodes)" << endl;
             exit(1);
-        }
+        }*/
+        exit(1);
     } else {
-        topo_cfg = make_unique<FatTreeTopologyCfg>(tiers, no_of_nodes, linkspeed, memFromPkt(queuesize_pkt),
-                                                   hop_latency, switch_latency, 
-                                                   qt, snd_type);
+        if (no_of_children.empty() || no_of_parent.empty()) {
+            cerr << "No topology specified: pass -xgft \"h;m_1,...,m_h;w_1,...,w_h\""
+                 << " (eg. -xgft \"3;4,2,2;1,2,2\")" << endl;
+            exit(1);
+        }
+        topo_cfg = make_unique<XGFTTopologyCfg>(tiers, no_of_nodes, no_of_children, no_of_parent,
+                                                linkspeed, memFromPkt(queuesize_pkt),
+                                                hop_latency, switch_latency, qt, snd_type);
     }
 
     simtime_picosec network_max_unloaded_rtt = calculate_rtt(topo_cfg.get(), linkspeed);
@@ -723,10 +818,10 @@ int main(int argc, char **argv) {
 
     cout << *topo_cfg << endl;
 
-    vector<unique_ptr<FatTreeTopology>> topo;
+    vector<unique_ptr<XGFTTopology>> topo;
     topo.resize(planes);
     for (uint32_t p = 0; p < planes; p++) {
-        topo[p] = make_unique<FatTreeTopology>(topo_cfg.get(), qlf, &eventlist, nullptr);
+        topo[p] = make_unique<XGFTTopology>(topo_cfg.get(), qlf, &eventlist, nullptr);
 
         if (log_switches) {
             topo[p]->add_switch_loggers(logfile, logtime);
@@ -744,7 +839,7 @@ int main(int argc, char **argv) {
 
         cout << "Adding link failure switch type" << crt->switch_type << " Switch ID " << crt->switch_id << " link ID "  << crt->link_id << endl;
         // xxx we only support failures in plane 0 for now.
-        topo[0]->add_failed_link(crt->switch_type,crt->switch_id,crt->link_id);
+        //topo[0]->add_failed_link(crt->switch_type,crt->switch_id,crt->link_id); TODO for now, no failure
     }
 
     // Initialize congestion control algorithms
@@ -953,24 +1048,24 @@ int main(int argc, char **argv) {
                 case REACTIVE_ECN:
                     {
                         Route* srctotor = new Route();
-                        srctotor->push_back(topo[p]->queues_ns_nlp[src][topo_cfg->HOST_POD_SWITCH(src)][0]);
-                        srctotor->push_back(topo[p]->pipes_ns_nlp[src][topo_cfg->HOST_POD_SWITCH(src)][0]);
-                        srctotor->push_back(topo[p]->queues_ns_nlp[src][topo_cfg->HOST_POD_SWITCH(src)][0]->getRemoteEndpoint());
+                        srctotor->push_back(topo[p]->queues_up[0][src][topo_cfg->HOST_POD_SWITCH(src)][0]);
+                        srctotor->push_back(topo[p]->pipes_up[0][src][topo_cfg->HOST_POD_SWITCH(src)][0]);
+                        srctotor->push_back(topo[p]->queues_up[0][src][topo_cfg->HOST_POD_SWITCH(src)][0]->getRemoteEndpoint());
 
                         Route* dsttotor = new Route();
-                        dsttotor->push_back(topo[p]->queues_ns_nlp[dest][topo_cfg->HOST_POD_SWITCH(dest)][0]);
-                        dsttotor->push_back(topo[p]->pipes_ns_nlp[dest][topo_cfg->HOST_POD_SWITCH(dest)][0]);
-                        dsttotor->push_back(topo[p]->queues_ns_nlp[dest][topo_cfg->HOST_POD_SWITCH(dest)][0]->getRemoteEndpoint());
+                        dsttotor->push_back(topo[p]->queues_up[0][dest][topo_cfg->HOST_POD_SWITCH(dest)][0]);
+                        dsttotor->push_back(topo[p]->pipes_up[0][dest][topo_cfg->HOST_POD_SWITCH(dest)][0]);
+                        dsttotor->push_back(topo[p]->queues_up[0][dest][topo_cfg->HOST_POD_SWITCH(dest)][0]->getRemoteEndpoint());
 
                         uec_src->connectPort(p, *srctotor, *dsttotor, *uec_snk, crt->start);
                         //uec_src->setPaths(path_entropy_size);
                         //uec_snk->setPaths(path_entropy_size);
 
                         //register src and snk to receive packets from their respective TORs. 
-                        assert(topo[p]->switches_lp[topo_cfg->HOST_POD_SWITCH(src)]);
-                        assert(topo[p]->switches_lp[topo_cfg->HOST_POD_SWITCH(src)]);
-                        topo[p]->switches_lp[topo_cfg->HOST_POD_SWITCH(src)]->addHostPort(src,uec_snk->flowId(),uec_src->getPort(p));
-                        topo[p]->switches_lp[topo_cfg->HOST_POD_SWITCH(dest)]->addHostPort(dest,uec_src->flowId(),uec_snk->getPort(p));
+                        assert(topo[p]->switches[0][topo_cfg->HOST_POD_SWITCH(src)]);
+                        assert(topo[p]->switches[0][topo_cfg->HOST_POD_SWITCH(dest)]);
+                        topo[p]->switches[0][topo_cfg->HOST_POD_SWITCH(src)]->addHostPort(src,uec_snk->flowId(),uec_src->getPort(p));
+                        topo[p]->switches[0][topo_cfg->HOST_POD_SWITCH(dest)]->addHostPort(dest,uec_src->flowId(),uec_snk->getPort(p));
                         break;
                     }
                 default:
