@@ -574,6 +574,7 @@ unique_ptr<XGFTTopologyCfg> XGFTTopologyCfg::load(string filename,
 
         file.close();
         // return cfg;
+        return nullptr;
     } else {
         cerr << "Failed to open XGFT config file " << filename << endl;
         exit(1);
