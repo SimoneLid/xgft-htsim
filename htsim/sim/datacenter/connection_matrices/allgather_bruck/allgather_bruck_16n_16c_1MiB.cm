@@ -1,0 +1,115 @@
+Nodes 16
+Connections 64
+Triggers 48
+0->15 id 1 start 0 size 65536 send_done_trigger 1
+15->13 id 2 trigger 1 size 131072 send_done_trigger 2
+13->9 id 3 trigger 2 size 262144 send_done_trigger 3
+9->1 id 4 trigger 3 size 524288
+1->0 id 5 start 0 size 65536 send_done_trigger 4
+0->14 id 6 trigger 4 size 131072 send_done_trigger 5
+14->10 id 7 trigger 5 size 262144 send_done_trigger 6
+10->2 id 8 trigger 6 size 524288
+2->1 id 9 start 0 size 65536 send_done_trigger 7
+1->15 id 10 trigger 7 size 131072 send_done_trigger 8
+15->11 id 11 trigger 8 size 262144 send_done_trigger 9
+11->3 id 12 trigger 9 size 524288
+3->2 id 13 start 0 size 65536 send_done_trigger 10
+2->0 id 14 trigger 10 size 131072 send_done_trigger 11
+0->12 id 15 trigger 11 size 262144 send_done_trigger 12
+12->4 id 16 trigger 12 size 524288
+4->3 id 17 start 0 size 65536 send_done_trigger 13
+3->1 id 18 trigger 13 size 131072 send_done_trigger 14
+1->13 id 19 trigger 14 size 262144 send_done_trigger 15
+13->5 id 20 trigger 15 size 524288
+5->4 id 21 start 0 size 65536 send_done_trigger 16
+4->2 id 22 trigger 16 size 131072 send_done_trigger 17
+2->14 id 23 trigger 17 size 262144 send_done_trigger 18
+14->6 id 24 trigger 18 size 524288
+6->5 id 25 start 0 size 65536 send_done_trigger 19
+5->3 id 26 trigger 19 size 131072 send_done_trigger 20
+3->15 id 27 trigger 20 size 262144 send_done_trigger 21
+15->7 id 28 trigger 21 size 524288
+7->6 id 29 start 0 size 65536 send_done_trigger 22
+6->4 id 30 trigger 22 size 131072 send_done_trigger 23
+4->0 id 31 trigger 23 size 262144 send_done_trigger 24
+0->8 id 32 trigger 24 size 524288
+8->7 id 33 start 0 size 65536 send_done_trigger 25
+7->5 id 34 trigger 25 size 131072 send_done_trigger 26
+5->1 id 35 trigger 26 size 262144 send_done_trigger 27
+1->9 id 36 trigger 27 size 524288
+9->8 id 37 start 0 size 65536 send_done_trigger 28
+8->6 id 38 trigger 28 size 131072 send_done_trigger 29
+6->2 id 39 trigger 29 size 262144 send_done_trigger 30
+2->10 id 40 trigger 30 size 524288
+10->9 id 41 start 0 size 65536 send_done_trigger 31
+9->7 id 42 trigger 31 size 131072 send_done_trigger 32
+7->3 id 43 trigger 32 size 262144 send_done_trigger 33
+3->11 id 44 trigger 33 size 524288
+11->10 id 45 start 0 size 65536 send_done_trigger 34
+10->8 id 46 trigger 34 size 131072 send_done_trigger 35
+8->4 id 47 trigger 35 size 262144 send_done_trigger 36
+4->12 id 48 trigger 36 size 524288
+12->11 id 49 start 0 size 65536 send_done_trigger 37
+11->9 id 50 trigger 37 size 131072 send_done_trigger 38
+9->5 id 51 trigger 38 size 262144 send_done_trigger 39
+5->13 id 52 trigger 39 size 524288
+13->12 id 53 start 0 size 65536 send_done_trigger 40
+12->10 id 54 trigger 40 size 131072 send_done_trigger 41
+10->6 id 55 trigger 41 size 262144 send_done_trigger 42
+6->14 id 56 trigger 42 size 524288
+14->13 id 57 start 0 size 65536 send_done_trigger 43
+13->11 id 58 trigger 43 size 131072 send_done_trigger 44
+11->7 id 59 trigger 44 size 262144 send_done_trigger 45
+7->15 id 60 trigger 45 size 524288
+15->14 id 61 start 0 size 65536 send_done_trigger 46
+14->12 id 62 trigger 46 size 131072 send_done_trigger 47
+12->8 id 63 trigger 47 size 262144 send_done_trigger 48
+8->0 id 64 trigger 48 size 524288
+trigger id 1 oneshot
+trigger id 2 oneshot
+trigger id 3 oneshot
+trigger id 4 oneshot
+trigger id 5 oneshot
+trigger id 6 oneshot
+trigger id 7 oneshot
+trigger id 8 oneshot
+trigger id 9 oneshot
+trigger id 10 oneshot
+trigger id 11 oneshot
+trigger id 12 oneshot
+trigger id 13 oneshot
+trigger id 14 oneshot
+trigger id 15 oneshot
+trigger id 16 oneshot
+trigger id 17 oneshot
+trigger id 18 oneshot
+trigger id 19 oneshot
+trigger id 20 oneshot
+trigger id 21 oneshot
+trigger id 22 oneshot
+trigger id 23 oneshot
+trigger id 24 oneshot
+trigger id 25 oneshot
+trigger id 26 oneshot
+trigger id 27 oneshot
+trigger id 28 oneshot
+trigger id 29 oneshot
+trigger id 30 oneshot
+trigger id 31 oneshot
+trigger id 32 oneshot
+trigger id 33 oneshot
+trigger id 34 oneshot
+trigger id 35 oneshot
+trigger id 36 oneshot
+trigger id 37 oneshot
+trigger id 38 oneshot
+trigger id 39 oneshot
+trigger id 40 oneshot
+trigger id 41 oneshot
+trigger id 42 oneshot
+trigger id 43 oneshot
+trigger id 44 oneshot
+trigger id 45 oneshot
+trigger id 46 oneshot
+trigger id 47 oneshot
+trigger id 48 oneshot
