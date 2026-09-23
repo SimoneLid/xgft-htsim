@@ -668,6 +668,9 @@ void tokenize(string const &str, const char delim, vector<string> &out)
     stringstream ss(str);
     string s;
     while (getline(ss, s, delim)) {
+        if (!s.empty() && s.back() == '\r') {
+            s.pop_back();
+        }
         out.push_back(s);
     }
 }
